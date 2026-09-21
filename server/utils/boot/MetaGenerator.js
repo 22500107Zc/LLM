@@ -26,19 +26,50 @@ class MetaGenerator {
   /** @type {MetaTagDefinition[]|null} */
   #customConfig = null;
 
-  #defaultManifest = {
-    name: "AnythingLLM",
-    short_name: "AnythingLLM",
-    display: "standalone",
-    orientation: "portrait",
-    start_url: "/",
-    icons: [
-      {
-        src: "/favicon.png",
-        sizes: "any",
-      },
-    ],
-  };
+  /**
+   * Commercial platform branding, resolved from the deployment's environment.
+   * Falls back to the upstream defaults when the module is unavailable so this
+   * class keeps working if the business layer is ever removed.
+   */
+  #brand() {
+    try {
+      return require("../../business/config").branding;
+    } catch {
+      return {
+        appName: "AnythingLLM",
+        tagline: "",
+        primaryDomain: "",
+        appIcon: "",
+      };
+    }
+  }
+
+  /** The page title and social description shown to a business's users. */
+  #title() {
+    const { appName, tagline } = this.#brand();
+    return tagline ? `${appName} | ${tagline}` : appName;
+  }
+
+  #icon() {
+    return this.#brand().appIcon || "/favicon.png";
+  }
+
+  get #defaultManifest() {
+    const { appName } = this.#brand();
+    return {
+      name: appName,
+      short_name: appName,
+      display: "standalone",
+      orientation: "portrait",
+      start_url: "/",
+      icons: [
+        {
+          src: this.#icon(),
+          sizes: "any",
+        },
+      ],
+    };
+  }
 
   constructor() {
     if (MetaGenerator._instance) return MetaGenerator._instance;
@@ -50,96 +81,52 @@ class MetaGenerator {
   }
 
   #defaultMeta() {
+    // Every customer-facing tag is derived from the deployment's own brand.
+    // No upstream product name, domain or promotional image is served.
+    const title = this.#title();
+    const icon = this.#icon();
+    const domain = this.#brand().primaryDomain;
+    const url = domain
+      ? domain.startsWith("http")
+        ? domain
+        : `https://${domain}`
+      : null;
+
     return [
       {
         tag: "link",
-        props: { type: "image/svg+xml", href: "/favicon.png" },
+        props: { type: "image/svg+xml", href: icon },
         content: null,
       },
-      {
-        tag: "title",
-        props: null,
-        content: "AnythingLLM | Your personal LLM trained on anything",
-      },
+      { tag: "title", props: null, content: title },
+      { tag: "meta", props: { name: "title", content: title } },
+      { tag: "meta", props: { name: "description", content: title } },
 
-      {
-        tag: "meta",
-        props: {
-          name: "title",
-          content: "AnythingLLM | Your personal LLM trained on anything",
-        },
-      },
-      {
-        tag: "meta",
-        props: {
-          description: "title",
-          content: "AnythingLLM | Your personal LLM trained on anything",
-        },
-      },
+      // A private business deployment should never be indexed or previewed
+      // by search engines and social crawlers.
+      { tag: "meta", props: { name: "robots", content: "noindex, nofollow" } },
 
-      // <!-- Facebook -->
+      // <!-- Open Graph -->
       { tag: "meta", props: { property: "og:type", content: "website" } },
-      {
-        tag: "meta",
-        props: { property: "og:url", content: "https://anythingllm.com" },
-      },
-      {
-        tag: "meta",
-        props: {
-          property: "og:title",
-          content: "AnythingLLM | Your personal LLM trained on anything",
-        },
-      },
-      {
-        tag: "meta",
-        props: {
-          property: "og:description",
-          content: "AnythingLLM | Your personal LLM trained on anything",
-        },
-      },
-      {
-        tag: "meta",
-        props: {
-          property: "og:image",
-          content:
-            "https://raw.githubusercontent.com/Mintplex-Labs/anything-llm/master/images/promo.png",
-        },
-      },
+      ...(url
+        ? [{ tag: "meta", props: { property: "og:url", content: url } }]
+        : []),
+      { tag: "meta", props: { property: "og:title", content: title } },
+      { tag: "meta", props: { property: "og:description", content: title } },
 
       // <!-- Twitter -->
+      { tag: "meta", props: { property: "twitter:card", content: "summary" } },
+      ...(url
+        ? [{ tag: "meta", props: { property: "twitter:url", content: url } }]
+        : []),
+      { tag: "meta", props: { property: "twitter:title", content: title } },
       {
         tag: "meta",
-        props: { property: "twitter:card", content: "summary_large_image" },
-      },
-      {
-        tag: "meta",
-        props: { property: "twitter:url", content: "https://anythingllm.com" },
-      },
-      {
-        tag: "meta",
-        props: {
-          property: "twitter:title",
-          content: "AnythingLLM | Your personal LLM trained on anything",
-        },
-      },
-      {
-        tag: "meta",
-        props: {
-          property: "twitter:description",
-          content: "AnythingLLM | Your personal LLM trained on anything",
-        },
-      },
-      {
-        tag: "meta",
-        props: {
-          property: "twitter:image",
-          content:
-            "https://raw.githubusercontent.com/Mintplex-Labs/anything-llm/master/images/promo.png",
-        },
+        props: { property: "twitter:description", content: title },
       },
 
-      { tag: "link", props: { rel: "icon", href: "/favicon.png" } },
-      { tag: "link", props: { rel: "apple-touch-icon", href: "/favicon.png" } },
+      { tag: "link", props: { rel: "icon", href: icon } },
+      { tag: "link", props: { rel: "apple-touch-icon", href: icon } },
 
       // PWA specific tags
       {
@@ -243,9 +230,7 @@ class MetaGenerator {
           return {
             tag: "title",
             props: null,
-            content:
-              customTitle ??
-              "AnythingLLM | Your personal LLM trained on anything",
+            content: customTitle ?? this.#title(),
           };
         }
         // Override meta title
@@ -254,9 +239,7 @@ class MetaGenerator {
             tag: "meta",
             props: {
               name: "title",
-              content:
-                customTitle ??
-                "AnythingLLM | Your personal LLM trained on anything",
+              content: customTitle ?? this.#title(),
             },
           };
         }
@@ -266,9 +249,7 @@ class MetaGenerator {
             tag: "meta",
             props: {
               property: "og:title",
-              content:
-                customTitle ??
-                "AnythingLLM | Your personal LLM trained on anything",
+              content: customTitle ?? this.#title(),
             },
           };
         }
@@ -278,9 +259,7 @@ class MetaGenerator {
             tag: "meta",
             props: {
               property: "twitter:title",
-              content:
-                customTitle ??
-                "AnythingLLM | Your personal LLM trained on anything",
+              content: customTitle ?? this.#title(),
             },
           };
         }
@@ -346,7 +325,7 @@ class MetaGenerator {
       const { SystemSettings } = require("../../models/systemSettings");
       const manifestName = await SystemSettings.getValueOrFallback(
         { label: "meta_page_title" },
-        "AnythingLLM"
+        this.#brand().appName
       );
       const faviconURL = await SystemSettings.getValueOrFallback(
         { label: "meta_page_favicon" },
