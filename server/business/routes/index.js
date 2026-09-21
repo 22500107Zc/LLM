@@ -71,6 +71,17 @@ function businessEndpoints(app) {
   );
   app.use("/v1/workspace/:slug/chat", requireActiveSubscription);
   app.use("/v1/workspace/:slug/stream-chat", requireActiveSubscription);
+  // The developer API's THREAD variants reach ApiChatHandler exactly like the
+  // workspace ones. Leaving them out left a restricted deployment able to keep
+  // using the model by calling these directly.
+  app.use(
+    "/v1/workspace/:slug/thread/:threadSlug/chat",
+    requireActiveSubscription
+  );
+  app.use(
+    "/v1/workspace/:slug/thread/:threadSlug/stream-chat",
+    requireActiveSubscription
+  );
   app.use("/v1/openai/chat/completions", requireActiveSubscription);
 
   // Public website agents get the visitor-safe abort shape instead, so a
@@ -78,4 +89,24 @@ function businessEndpoints(app) {
   app.use("/embed/:embedId/stream-chat", requireActiveSubscriptionForPublic);
 }
 
-module.exports = { businessEndpoints };
+/**
+ * Every path where AI usage is gated.
+ *
+ * Exported so a test can assert this list still covers every endpoint that
+ * reaches a model. A new chat route added upstream without a mount here would
+ * otherwise be a silent way to use the product without paying.
+ */
+const GATED_AI_PATHS = Object.freeze({
+  authenticated: Object.freeze([
+    "/workspace/:slug/stream-chat",
+    "/workspace/:slug/thread/:threadSlug/stream-chat",
+    "/v1/workspace/:slug/chat",
+    "/v1/workspace/:slug/stream-chat",
+    "/v1/workspace/:slug/thread/:threadSlug/chat",
+    "/v1/workspace/:slug/thread/:threadSlug/stream-chat",
+    "/v1/openai/chat/completions",
+  ]),
+  public: Object.freeze(["/embed/:embedId/stream-chat"]),
+});
+
+module.exports = { businessEndpoints, GATED_AI_PATHS };

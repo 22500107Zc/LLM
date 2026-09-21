@@ -55,6 +55,12 @@ second application alongside this one.
   remove-containers. Update stops if its backup fails. No data-deletion command.
 - **Stripe-hosted Payment Link** — the preferred way to take payment. See
   "Important architectural decisions" below.
+- **Access-gate coverage** — `GATED_AI_PATHS` in
+  `server/business/routes/index.js` lists every path where AI usage is gated,
+  and a test walks the real route files and fails if any endpoint reaching a
+  model is missing from it. This found and closed a real gap: the developer
+  API's thread chat endpoints were ungated, so a restricted deployment could
+  keep using the model by calling them directly.
 - **Security and dependency gates** — zero critical advisories in production
   dependencies; remaining highs documented in `SECURITY_AUDIT.md` with chain and
   reachability. Committed-secret scanner reports locations only, never values.
@@ -78,8 +84,8 @@ Nothing in flight. The working tree is clean.
 ## Test status
 
 ```
-npx jest                       1460 passed, 3 failed (ffmpeg), 1463 total
-npx jest __tests__/business     381 passed, 381 total   (run from server/)
+npx jest                       1476 passed, 3 failed (ffmpeg), 1479 total
+npx jest __tests__/business     384 passed, 384 total   (run from server/)
 ./scripts/final-verification.sh 19 passed, 1 failed, 3 blocked
 ./scripts/operator-backup-test.sh   18 passed, 0 failed
 ```

@@ -207,3 +207,76 @@ describe("restriction is suspension, not deletion", () => {
     expect(result.message.toLowerCase()).toContain("data is retained");
   });
 });
+
+describe("every AI entry point is actually gated", () => {
+  /**
+   * Middleware that works is not the same as middleware that is mounted.
+   *
+   * The gate is attached per path, so an endpoint that reaches a model
+   * without a mount is a way to keep using the product after payment stops -
+   * and it fails silently, because everything still works. This walks the
+   * real route files and fails if any of them reaches ApiChatHandler or the
+   * chat helpers without appearing in the mount list.
+   */
+  const fs = require("fs");
+  const path = require("path");
+
+  const SERVER_DIR = path.resolve(__dirname, "..", "..");
+  const { GATED_AI_PATHS } = require("../../business/routes");
+  const gated = new Set([
+    ...GATED_AI_PATHS.authenticated,
+    ...GATED_AI_PATHS.public,
+  ]);
+
+  /** Route files that expose model-invoking endpoints. */
+  const ROUTE_FILES = [
+    "endpoints/api/workspace/index.js",
+    "endpoints/api/workspaceThread/index.js",
+    "endpoints/api/openai/index.js",
+    "endpoints/chat.js",
+    "endpoints/embed/index.js",
+  ];
+
+  /** Endpoints that read stored history rather than invoking a model. */
+  const READ_ONLY = /\/chats$|\/chats\//;
+
+  function chatEndpointsIn(relativePath) {
+    const full = path.join(SERVER_DIR, relativePath);
+    if (!fs.existsSync(full)) return [];
+    const source = fs.readFileSync(full, "utf8");
+
+    // Only files that actually invoke a model are worth scanning.
+    if (!/ApiChatHandler|streamChatWithWorkspace|chatWithWorkspace|streamChatWithForEmbed/.test(source))
+      return [];
+
+    return [...source.matchAll(/"(\/[^"]*chat[^"]*)"/g)]
+      .map((match) => match[1])
+      .filter((route) => !READ_ONLY.test(route));
+  }
+
+  it("mounts the gate on every model-invoking route", () => {
+    const ungated = [];
+    for (const file of ROUTE_FILES)
+      for (const route of chatEndpointsIn(file))
+        if (!gated.has(route)) ungated.push(`${file} -> ${route}`);
+
+    expect(ungated).toEqual([]);
+  });
+
+  it("covers the developer API's thread endpoints", () => {
+    // These reach ApiChatHandler exactly like the workspace ones, and were
+    // once missing, which let a restricted deployment keep using the model.
+    expect(gated.has("/v1/workspace/:slug/thread/:threadSlug/chat")).toBe(true);
+    expect(gated.has("/v1/workspace/:slug/thread/:threadSlug/stream-chat")).toBe(
+      true
+    );
+  });
+
+  it("gates public website agents separately from authenticated usage", () => {
+    // A visitor must never be shown the deployment's billing state.
+    expect(GATED_AI_PATHS.public).toContain("/embed/:embedId/stream-chat");
+    expect(GATED_AI_PATHS.authenticated).not.toContain(
+      "/embed/:embedId/stream-chat"
+    );
+  });
+});
