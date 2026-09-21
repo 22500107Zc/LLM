@@ -46,6 +46,12 @@ const {
   googleAgentSkillEndpoints,
 } = require("./endpoints/utils/googleAgentSkillEndpoints");
 const { memoryEndpoints } = require("./endpoints/memory");
+const { businessEndpoints } = require("./business/routes");
+const { handleStripeWebhook } = require("./business/billing/webhook");
+const { bootCommercialPlatform } = require("./business/boot");
+const {
+  requireAuthenticatedMode,
+} = require("./business/middleware/requireAuthenticatedMode");
 const { httpLogger } = require("./middleware/httpLogger");
 const app = express();
 const apiRouter = express.Router();
@@ -62,7 +68,21 @@ if (
     })
   );
 }
+// Commercial platform boot checks - refuses to start a production deployment
+// with an unsafe configuration.
+bootCommercialPlatform();
+
 app.use(cors({ origin: true }));
+
+// The Stripe webhook must see the exact bytes Stripe signed, so it is mounted
+// with a raw body parser ahead of the JSON/text parsers below. Moving this
+// after bodyParser.json() would break signature verification.
+app.post(
+  "/api/billing/stripe/webhook",
+  express.raw({ type: "application/json", limit: "1mb" }),
+  handleStripeWebhook
+);
+
 app.use(bodyParser.text({ limit: FILE_LIMIT }));
 app.use(bodyParser.json({ limit: FILE_LIMIT }));
 app.use(
@@ -79,6 +99,12 @@ if (!!process.env.ENABLE_HTTPS) {
 }
 
 app.use("/api", apiRouter);
+
+// Production deployments must be authenticated. This closes the single-user,
+// no-AUTH_TOKEN passthrough that would otherwise serve the whole application
+// anonymously. Bootstrap and public-by-design paths are allowlisted inside.
+apiRouter.use(requireAuthenticatedMode);
+
 systemEndpoints(apiRouter);
 extensionEndpoints(apiRouter);
 workspaceEndpoints(apiRouter);
@@ -105,6 +131,10 @@ scheduledJobEndpoints(apiRouter);
 outlookAgentEndpoints(apiRouter);
 googleAgentSkillEndpoints(apiRouter);
 memoryEndpoints(apiRouter);
+
+// Commercial Business AI Operations Platform endpoints.
+businessEndpoints(apiRouter);
+
 // Externally facing embedder endpoints
 embeddedEndpoints(apiRouter);
 

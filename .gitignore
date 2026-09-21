@@ -10,3 +10,8 @@ aws_cf_deploy_anything_llm.json
 yarn.lock
 *.bak
 .idea
+
+# Local deployment environment files (never commit secrets)
+server/.env
+server/.env.production
+docker/.env

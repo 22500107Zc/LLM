@@ -486,3 +486,277 @@ model model_router_rules {
   @@index([router_id])
   @@index([router_id, enabled, priority])
 }
+
+// ---------------------------------------------------------------------------
+// COMMERCIAL PLATFORM MODELS
+// Added by the managed Business AI Operations Platform fork.
+// These tables are purely additive - no upstream table is modified - so that
+// upstream schema changes merge cleanly. See UPSTREAM_CHANGES.md.
+// ---------------------------------------------------------------------------
+
+/// Singleton (id = 1) record holding the deployment's Stripe subscription state.
+model billing_subscription {
+  id                     Int       @id @default(1)
+  stripe_customer_id     String?
+  stripe_subscription_id String?
+  stripe_price_id        String?
+  status                 String    @default("unconfigured")
+  collection_method      String?
+  currency               String?   @default("usd")
+  unit_amount            Int?
+  current_period_start   DateTime?
+  current_period_end     DateTime?
+  cancel_at_period_end   Boolean   @default(false)
+  canceled_at            DateTime?
+  latest_invoice_id      String?
+  latest_invoice_status  String?
+  latest_invoice_url     String?
+  last_payment_status    String?
+  last_payment_at        DateTime?
+  past_due_since         DateTime?
+  restricted_at          DateTime?
+  billing_email          String?
+  createdAt              DateTime  @default(now())
+  lastUpdatedAt          DateTime  @default(now())
+}
+
+/// Every Stripe webhook event we have already processed. Guarantees idempotency.
+model billing_events {
+  id              Int      @id @default(autoincrement())
+  stripe_event_id String   @unique
+  type            String
+  status          String   @default("processed")
+  summary         String?
+  occurredAt      DateTime @default(now())
+  processedAt     DateTime @default(now())
+
+  @@index([type])
+}
+
+/// Business-level audit trail. Deliberately separate from upstream `event_logs`
+/// so retention, schema and access control can be managed commercially.
+model audit_logs {
+  id           Int      @id @default(autoincrement())
+  action       String
+  category     String   @default("general")
+  actor_id     Int?
+  actor_label  String?
+  resource     String?
+  resource_id  String?
+  metadata     String?
+  ip_address   String?
+  occurredAt   DateTime @default(now())
+
+  @@index([action])
+  @@index([category])
+  @@index([occurredAt])
+}
+
+/// The simplified business role layered on top of upstream user roles.
+model platform_user_profiles {
+  id            Int      @id @default(autoincrement())
+  user_id       Int      @unique
+  business_role String   @default("member")
+  title         String?
+  createdAt     DateTime @default(now())
+  lastUpdatedAt DateTime @default(now())
+}
+
+/// A business-facing "AI Agent". Thin productization layer over a workspace.
+model agent_profiles {
+  id                    Int      @id @default(autoincrement())
+  uuid                  String   @unique
+  name                  String
+  description           String?
+  avatar_url            String?
+  template              String?
+  workspace_id          Int
+  active                Boolean  @default(true)
+  visibility            String   @default("private")
+  fallback_message      String?
+  lead_capture_enabled  Boolean  @default(false)
+  lead_capture_fields   String?
+  escalation_enabled    Boolean  @default(false)
+  escalation_target     String?
+  createdBy             Int?
+  createdAt             DateTime @default(now())
+  lastUpdatedAt         DateTime @default(now())
+
+  @@index([workspace_id])
+}
+
+/// Captured sales/contact lead.
+model leads {
+  id                   Int      @id @default(autoincrement())
+  uuid                 String   @unique
+  first_name           String?
+  last_name            String?
+  email                String?
+  company              String?
+  phone                String?
+  job_title            String?
+  reason               String?
+  conversation_summary String?
+  source_url           String?
+  agent_profile_id     Int?
+  embed_id             Int?
+  session_id           String?
+  status               String   @default("new")
+  notes                String?
+  delivered            Boolean  @default(false)
+  delivery_error       String?
+  createdAt            DateTime @default(now())
+  lastUpdatedAt        DateTime @default(now())
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// A request to hand a conversation to a human.
+model escalations {
+  id               Int      @id @default(autoincrement())
+  uuid             String   @unique
+  contact_name     String?
+  contact_email    String?
+  contact_phone    String?
+  question         String?
+  transcript       String?
+  summary          String?
+  agent_profile_id Int?
+  embed_id         Int?
+  session_id       String?
+  source_url       String?
+  reason           String   @default("requested")
+  status           String   @default("open")
+  delivered        Boolean  @default(false)
+  delivery_error   String?
+  resolved_at      DateTime?
+  createdAt        DateTime @default(now())
+  lastUpdatedAt    DateTime @default(now())
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// Outbound business system integration (webhook, email, slack, hubspot, salesforce).
+model integrations {
+  id              Int       @id @default(autoincrement())
+  uuid            String    @unique
+  name            String
+  provider        String
+  enabled         Boolean   @default(true)
+  config          String?
+  secret_ciphered String?
+  events          String?
+  last_status     String?
+  last_error      String?
+  last_delivery   DateTime?
+  createdBy       Int?
+  createdAt       DateTime  @default(now())
+  lastUpdatedAt   DateTime  @default(now())
+
+  @@index([provider])
+}
+
+/// Log of every outbound integration delivery attempt.
+model integration_deliveries {
+  id             Int      @id @default(autoincrement())
+  integration_id Int
+  event          String
+  status         String
+  status_code    Int?
+  error          String?
+  attemptedAt    DateTime @default(now())
+
+  @@index([integration_id])
+}
+
+/// A question the AI could not answer well - grouped into knowledge gaps.
+model knowledge_gaps {
+  id               Int      @id @default(autoincrement())
+  normalized       String   @unique
+  question         String
+  frequency        Int      @default(1)
+  reasons          String?
+  agent_profile_id Int?
+  workspace_id     Int?
+  embed_id         Int?
+  status           String   @default("open")
+  suggested_action String?
+  note             String?
+  firstSeenAt      DateTime @default(now())
+  lastSeenAt       DateTime @default(now())
+
+  @@index([status])
+  @@index([frequency])
+}
+
+/// A business-critical regression test for AI answer quality.
+model quality_tests {
+  id                Int      @id @default(autoincrement())
+  uuid              String   @unique
+  question          String
+  expected_answer   String?
+  expected_concepts String?
+  required_source   String?
+  agent_profile_id  Int?
+  workspace_id      Int?
+  enabled           Boolean  @default(true)
+  createdBy         Int?
+  createdAt         DateTime @default(now())
+  lastUpdatedAt     DateTime @default(now())
+}
+
+/// One execution of the quality suite.
+model quality_runs {
+  id           Int       @id @default(autoincrement())
+  uuid         String    @unique
+  status       String    @default("running")
+  total        Int       @default(0)
+  passed       Int       @default(0)
+  needs_review Int       @default(0)
+  failed       Int       @default(0)
+  triggeredBy  Int?
+  startedAt    DateTime  @default(now())
+  completedAt  DateTime?
+}
+
+/// The result of one test within one run.
+model quality_results {
+  id          Int      @id @default(autoincrement())
+  run_id      Int
+  test_id     Int
+  verdict     String
+  score       Float?
+  answer      String?
+  sources     String?
+  detail      String?
+  createdAt   DateTime @default(now())
+
+  @@index([run_id])
+}
+
+/// Review state for a conversation (internal workspace chat or public embed chat).
+model conversation_reviews {
+  id              Int       @id @default(autoincrement())
+  channel         String
+  reference_id    String
+  reviewed        Boolean   @default(false)
+  reviewed_by     Int?
+  reviewed_at     DateTime?
+  summary         String?
+  note            String?
+  createdAt       DateTime  @default(now())
+  lastUpdatedAt   DateTime  @default(now())
+
+  @@unique([channel, reference_id])
+}
+
+/// Guided first-run experience progress + company profile.
+model platform_settings {
+  id            Int      @id @default(autoincrement())
+  label         String   @unique
+  value         String?
+  createdAt     DateTime @default(now())
+  lastUpdatedAt DateTime @default(now())
+}
