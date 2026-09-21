@@ -83,6 +83,34 @@ function checkoutEvent({ sessionId, customer = OUR_CUSTOMER, deploymentId = DEPL
   };
 }
 
+/**
+ * A Stripe-hosted Payment Link checkout. There is no session this deployment
+ * registered in advance - the only thing tying it to us is the
+ * client_reference_id Stripe echoes back from the link we handed over.
+ */
+function paymentLinkEvent({
+  sessionId = "cs_paymentlink_1",
+  customer = OUR_CUSTOMER,
+  clientReferenceId = DEPLOYMENT_ID,
+} = {}) {
+  return {
+    id: `evt_${sessionId}`,
+    type: "checkout.session.completed",
+    data: {
+      object: {
+        id: sessionId,
+        object: "checkout_session",
+        mode: "subscription",
+        customer,
+        payment_link: "plink_test_123",
+        ...(clientReferenceId === null
+          ? {}
+          : { client_reference_id: clientReferenceId }),
+      },
+    },
+  };
+}
+
 function invoiceEvent(customer = FOREIGN_CUSTOMER) {
   return {
     id: "evt_invoice_1",
@@ -131,7 +159,9 @@ describe("an unbound deployment", () => {
       OUR_CUSTOMER
     );
     expect(decision.allowed).toBe(false);
-    expect(decision.reason).toMatch(/not created by this deployment/);
+    expect(decision.reason).toMatch(/could not be matched/i);
+    // Refused, and surfaced for a human rather than silently dropped.
+    expect(decision.reviewRequired).toBe(true);
   });
 
   it("REFUSES a checkout whose metadata names another deployment", async () => {
@@ -419,5 +449,184 @@ describe("production boot requires a deployment identity", () => {
       SIG_SALT: strong(),
     });
     expect(errors).toHaveLength(0);
+  });
+});
+
+describe("Stripe-hosted Payment Link", () => {
+  it("binds from a payment link carrying THIS deployment's reference", async () => {
+    const db = makeDb();
+    const binding = loadBinding(db);
+
+    const decision = await binding.authorizeEvent(
+      paymentLinkEvent(),
+      OUR_CUSTOMER
+    );
+    expect(decision.allowed).toBe(true);
+    expect(decision.bindWith.via).toBe("payment_link");
+
+    const bound = await binding.bindCustomer(decision.bindWith);
+    expect(bound.result).toBe(binding.BIND_RESULT.BOUND);
+    expect(db.state.subscription.stripe_customer_id).toBe(OUR_CUSTOMER);
+    expect(db.state.subscription.bound_deployment_id).toBe(DEPLOYMENT_ID);
+  });
+
+  it("REFUSES a payment link that references another deployment", async () => {
+    const db = makeDb();
+    const binding = loadBinding(db);
+
+    const decision = await binding.authorizeEvent(
+      paymentLinkEvent({ clientReferenceId: OTHER_DEPLOYMENT_ID }),
+      FOREIGN_CUSTOMER
+    );
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toMatch(/another deployment/i);
+    expect(db.state.subscription.stripe_customer_id).toBeNull();
+  });
+
+  it("REFUSES a payment link when this deployment has no DEPLOYMENT_ID", async () => {
+    const db = makeDb();
+    const binding = loadBinding(db, { DEPLOYMENT_ID: "" });
+
+    const decision = await binding.authorizeEvent(
+      paymentLinkEvent(),
+      OUR_CUSTOMER
+    );
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toMatch(/no DEPLOYMENT_ID/i);
+    expect(db.state.subscription.stripe_customer_id).toBeNull();
+  });
+
+  it("does not activate anything when a checkout cannot be matched", async () => {
+    const db = makeDb();
+    const binding = loadBinding(db);
+
+    const decision = await binding.authorizeEvent(
+      paymentLinkEvent({ clientReferenceId: null }),
+      OUR_CUSTOMER
+    );
+    expect(decision.allowed).toBe(false);
+    // Flagged for a human rather than silently discarded.
+    expect(decision.reviewRequired).toBe(true);
+    expect(decision.reason).toMatch(/could not be matched/i);
+    expect(db.state.subscription.stripe_customer_id).toBeNull();
+  });
+
+  it("is idempotent: a replayed payment link cannot bind a second customer", async () => {
+    const db = makeDb();
+    const binding = loadBinding(db);
+
+    const first = await binding.authorizeEvent(paymentLinkEvent(), OUR_CUSTOMER);
+    expect((await binding.bindCustomer(first.bindWith)).result).toBe(
+      binding.BIND_RESULT.BOUND
+    );
+
+    // The very same event again: allowed, but with nothing left to bind.
+    const replay = await binding.authorizeEvent(paymentLinkEvent(), OUR_CUSTOMER);
+    expect(replay.allowed).toBe(true);
+    expect(replay.bindWith).toBeUndefined();
+    expect(db.state.subscription.stripe_customer_id).toBe(OUR_CUSTOMER);
+
+    // And binding again with the original instruction is a no-op, not a
+    // second customer.
+    expect((await binding.bindCustomer(first.bindWith)).result).toBe(
+      binding.BIND_RESULT.ALREADY_BOUND
+    );
+    expect(db.state.subscription.stripe_customer_id).toBe(OUR_CUSTOMER);
+
+    // And a DIFFERENT customer presenting our reference is refused outright.
+    const impostor = await binding.authorizeEvent(
+      paymentLinkEvent({ sessionId: "cs_other", customer: FOREIGN_CUSTOMER }),
+      FOREIGN_CUSTOMER
+    );
+    expect(impostor.allowed).toBe(false);
+    expect(db.state.subscription.stripe_customer_id).toBe(OUR_CUSTOMER);
+  });
+
+  it("still accepts a Checkout Session this deployment created", async () => {
+    // The payment-link path is additive: the original flow keeps working.
+    const db = makeDb();
+    const binding = loadBinding(db);
+    await binding.recordPendingCheckout({
+      sessionId: "cs_api_1",
+      deploymentId: DEPLOYMENT_ID,
+      expectedCustomer: OUR_CUSTOMER,
+    });
+
+    const decision = await binding.authorizeEvent(
+      checkoutEvent({ sessionId: "cs_api_1" }),
+      OUR_CUSTOMER
+    );
+    expect(decision.allowed).toBe(true);
+    expect(decision.bindWith.via).toBe("checkout.session.completed");
+  });
+});
+
+describe("the payment link handed to a customer", () => {
+  function loadService(env = {}) {
+    jest.resetModules();
+    process.env.DEPLOYMENT_ID = env.DEPLOYMENT_ID ?? DEPLOYMENT_ID;
+    if (env.STRIPE_PAYMENT_LINK === undefined)
+      process.env.STRIPE_PAYMENT_LINK = "https://buy.stripe.com/test_abc123";
+    else if (env.STRIPE_PAYMENT_LINK === null)
+      delete process.env.STRIPE_PAYMENT_LINK;
+    else process.env.STRIPE_PAYMENT_LINK = env.STRIPE_PAYMENT_LINK;
+    return require("../../business/billing/service");
+  }
+
+  afterEach(() => {
+    delete process.env.STRIPE_PAYMENT_LINK;
+    delete process.env.DEPLOYMENT_ID;
+  });
+
+  it("carries the deployment reference the webhook matches on", () => {
+    const service = loadService();
+    const result = service.paymentLink();
+    expect(result.success).toBe(true);
+    const url = new URL(result.url);
+    expect(url.searchParams.get("client_reference_id")).toBe(DEPLOYMENT_ID);
+  });
+
+  it("prefills the email as a convenience without matching on it", () => {
+    const service = loadService();
+    const url = new URL(service.paymentLink({ email: "cfo@acme.test" }).url);
+    expect(url.searchParams.get("prefilled_email")).toBe("cfo@acme.test");
+    expect(url.searchParams.get("client_reference_id")).toBe(DEPLOYMENT_ID);
+  });
+
+  it("refuses to hand out a link that is not Stripe-hosted", () => {
+    for (const bad of [
+      "https://evil.example.com/pay",
+      "http://buy.stripe.com/test_abc",
+      "https://buy.stripe.com.evil.test/pay",
+      "not-a-url",
+    ]) {
+      const service = loadService({ STRIPE_PAYMENT_LINK: bad });
+      const result = service.paymentLink();
+      expect(result.success).toBe(false);
+      expect(result.url).toBeUndefined();
+    }
+  });
+
+  it("refuses when there is no DEPLOYMENT_ID to match a payment back to", () => {
+    const service = loadService({ DEPLOYMENT_ID: "" });
+    const result = service.paymentLink();
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/DEPLOYMENT_ID/);
+  });
+
+  it("reports plainly when no payment link is configured", () => {
+    const service = loadService({ STRIPE_PAYMENT_LINK: null });
+    const result = service.paymentLink();
+    expect(result.success).toBe(false);
+    expect(result.configured).toBe(false);
+    expect(service.paymentLinkConfigured()).toBe(false);
+  });
+
+  it("never leaks the webhook signing secret through the link", () => {
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_should_never_appear";
+    const service = loadService();
+    const result = service.paymentLink({ email: "a@b.test" });
+    expect(JSON.stringify(result)).not.toMatch(/whsec_/);
+    delete process.env.STRIPE_WEBHOOK_SECRET;
   });
 });

@@ -207,11 +207,54 @@ async function authorizeEvent(event, customerId) {
     };
 
   const session = event.data?.object ?? {};
+
+  // ---- path 1: a Stripe-hosted Payment Link ------------------------------
+  //
+  // A Payment Link is a static URL, so there is no session for this
+  // deployment to have registered in advance. What it does carry is
+  // `client_reference_id`, which the application set to its own DEPLOYMENT_ID
+  // when it handed the link over, and which Stripe returns verbatim.
+  //
+  // DEPLOYMENT_ID is long, random and never leaves the server except inside
+  // that link, so a matching value is strong evidence this payment is ours.
+  // It is compared in constant time and must match exactly - a present but
+  // different value means the payment belongs to somebody else's deployment,
+  // and is refused rather than ignored.
+  const reference = session.client_reference_id ?? null;
+  if (reference) {
+    if (!config.deploymentId)
+      return {
+        allowed: false,
+        reason:
+          "a payment-link checkout arrived but this deployment has no DEPLOYMENT_ID to match it against",
+      };
+    if (!idsMatch(reference, config.deploymentId))
+      return {
+        allowed: false,
+        reason: "payment-link checkout references another deployment",
+      };
+    return {
+      allowed: true,
+      bindWith: {
+        customerId,
+        via: "payment_link",
+        sessionId: session.id,
+      },
+    };
+  }
+
+  // ---- path 2: a Checkout Session this deployment created -----------------
   const pending = await findPendingCheckout(session.id);
   if (!pending)
+    // Not refused as someone else's: a customer may genuinely have paid
+    // through a link that lost its reference. It cannot be matched safely, so
+    // nothing is activated - but a human is told, rather than it vanishing
+    // into a log line.
     return {
       allowed: false,
-      reason: "checkout session was not created by this deployment",
+      reviewRequired: true,
+      reason:
+        "a checkout completed that carries no client_reference_id and matches no checkout this deployment created, so it could not be matched to this customer",
     };
 
   const metadataDeployment = session.metadata?.deployment_id ?? null;

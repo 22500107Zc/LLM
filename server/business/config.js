@@ -161,6 +161,10 @@ const config = {
       priceId: str("STRIPE_PRICE_ID", ""),
       productId: str("STRIPE_PRODUCT_ID", ""),
       portalConfigurationId: str("STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID", ""),
+      // A Stripe-HOSTED Payment Link. When set, this is how a customer pays:
+      // the application hands over a URL and makes no outbound Stripe call to
+      // start checkout. Stripe hosts the page; we only receive the webhook.
+      paymentLink: str("STRIPE_PAYMENT_LINK", ""),
       // Seed values used when the operator has not yet run a sync.
       customerId: str("STRIPE_CUSTOMER_ID", ""),
       subscriptionId: str("STRIPE_SUBSCRIPTION_ID", ""),

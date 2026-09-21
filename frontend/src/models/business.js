@@ -79,6 +79,12 @@ const Business = {
     verifyPrice: () => request("/billing/verify-price"),
     invoices: () => request("/billing/invoices"),
     checkout: (body) => request("/billing/checkout", { method: "POST", body }),
+    paymentLink: (email = null) =>
+      request(
+        `/billing/payment-link${email ? `?email=${encodeURIComponent(email)}` : ""}`
+      ),
+    events: (params = {}) =>
+      request(`/billing/events?${new URLSearchParams(params)}`),
     invoiceSubscription: (body) =>
       request("/billing/invoice-subscription", { method: "POST", body }),
     portal: () => request("/billing/portal", { method: "POST", body: {} }),

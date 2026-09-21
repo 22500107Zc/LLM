@@ -301,14 +301,20 @@ async function handleStripeWebhook(request, response) {
   const authorization = await binding.authorizeEvent(event, customerId);
 
   if (!authorization.allowed) {
-    await finishEvent(event.id, "rejected", authorization.reason);
+    // "unmatched" means we could not safely tell whose payment this is and a
+    // human should look. "rejected" means it demonstrably belongs elsewhere.
+    // Neither ever activates anything.
+    const status = authorization.reviewRequired ? "unmatched" : "rejected";
+    await finishEvent(event.id, status, authorization.reason);
     // Log enough to investigate, and nothing sensitive: no payload, no
     // deployment secret, only the identifiers Stripe already shows us.
     console.warn(
       `[Billing webhook] rejected ${event.type} (${event.id}): ${authorization.reason}`
     );
     await AuditLog.log({
-      action: "billing.foreign_event_rejected",
+      action: authorization.reviewRequired
+        ? "billing.unmatched_event_received"
+        : "billing.foreign_event_rejected",
       category: AuditLog.CATEGORIES.SECURITY,
       resource: "stripe_event",
       resourceId: event.id,

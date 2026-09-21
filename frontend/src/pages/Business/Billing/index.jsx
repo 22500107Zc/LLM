@@ -60,16 +60,27 @@ export default function BillingPage() {
   const [summary, setSummary] = useState(null);
   const [invoices, setInvoices] = useState([]);
   const [priceCheck, setPriceCheck] = useState(null);
+  const [paymentLink, setPaymentLink] = useState(null);
+  const [eventLog, setEventLog] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
 
   async function load() {
     setLoading(true);
-    const [summaryResult, invoiceResult] = await Promise.all([
-      Business.billing.summary(),
-      Business.billing.invoices(),
-    ]);
+    const [summaryResult, invoiceResult, linkResult, events] =
+      await Promise.all([
+        Business.billing.summary(),
+        Business.billing.invoices(),
+        Business.billing.paymentLink(),
+        Business.billing.events({ limit: 25 }),
+      ]);
+
+    // A configured payment link is how this deployment takes payment. An
+    // unconfigured one is not an error to shout about - it just means there is
+    // nothing to offer yet.
+    setPaymentLink(linkResult?.success ? linkResult : null);
+    setEventLog(events?.error ? null : events);
 
     if (summaryResult?.error) setError(summaryResult.error);
     else setSummary(summaryResult);
@@ -157,6 +168,47 @@ export default function BillingPage() {
             </>
           }
         >
+          {eventLog?.needsAttention > 0 && (
+            <div
+              role="alert"
+              className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-300"
+            >
+              <p className="font-medium">
+                {eventLog.needsAttention} Stripe event
+                {eventLog.needsAttention === 1 ? "" : "s"} could not be applied
+              </p>
+              <p className="mt-1">
+                A payment that cannot be matched to this deployment never
+                activates anything automatically. If someone has paid and access
+                did not change, this is where to look.
+              </p>
+            </div>
+          )}
+
+          {paymentLink && summary?.status !== "active" && (
+            <Card title="Pay for this subscription">
+              <p className="text-sm text-theme-text-secondary">
+                Payment is handled entirely by Stripe on their own hosted page.
+                This deployment never sees a card number, and the link below
+                already identifies this deployment, so your payment is matched
+                back to it automatically.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <a
+                  href={paymentLink.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+                >
+                  Pay {paymentLink.plan?.displayPrice ?? ""} with Stripe
+                </a>
+                <span className="text-xs text-theme-text-secondary">
+                  Access activates once Stripe confirms the payment.
+                </span>
+              </div>
+            </Card>
+          )}
+
           {access && access.access !== "ok" && (
             <div
               role="alert"

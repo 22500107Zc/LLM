@@ -156,6 +156,90 @@ async function ensureCustomer(details = {}) {
 }
 
 /**
+ * The Stripe-hosted Payment Link a customer opens to pay.
+ *
+ * WHY THIS EXISTS, AND WHY IT MAKES NO STRIPE API CALL
+ *
+ * Creating a Checkout Session requires an outbound Stripe API call at the
+ * exact moment a customer is trying to pay, so a network blip, an expired key
+ * or a Stripe incident becomes a failed sale. A hosted Payment Link is a
+ * static URL: Stripe hosts the page, and this application's only involvement
+ * is receiving the webhook afterwards. Nothing here can fail at purchase time.
+ *
+ * MATCHING
+ *
+ * The link carries `client_reference_id` set to this deployment's immutable
+ * DEPLOYMENT_ID. Stripe passes it straight through to
+ * `checkout.session.completed`, which gives a stable, unguessable match that
+ * does not depend on the customer typing the right email at checkout. Email is
+ * only ever a convenience prefill, never the thing a binding rests on.
+ *
+ * @param {{email?: string}} options
+ */
+function paymentLink(options = {}) {
+  const configured = String(config.stripe.paymentLink ?? "").trim();
+  if (!configured)
+    return {
+      success: false,
+      configured: false,
+      error:
+        "No Stripe Payment Link is configured for this deployment. Set STRIPE_PAYMENT_LINK.",
+    };
+
+  if (!config.deploymentId)
+    return {
+      success: false,
+      configured: true,
+      error:
+        "This deployment has no DEPLOYMENT_ID, so a payment could not be matched back to it. Refusing to hand out a payment link.",
+    };
+
+  let url;
+  try {
+    url = new URL(configured);
+  } catch {
+    return {
+      success: false,
+      configured: true,
+      error: "STRIPE_PAYMENT_LINK is not a valid URL.",
+    };
+  }
+
+  // Only ever hand out a Stripe-hosted URL. A mistyped or substituted host
+  // would send a paying customer somewhere we do not control.
+  if (url.protocol !== "https:" || !/(^|\.)stripe\.com$/.test(url.hostname))
+    return {
+      success: false,
+      configured: true,
+      error: `STRIPE_PAYMENT_LINK must be an https Stripe-hosted URL. Got host "${url.hostname}".`,
+    };
+
+  // The stable matching key. Stripe returns it verbatim on the completed
+  // session, so the webhook can bind without guessing.
+  url.searchParams.set("client_reference_id", config.deploymentId);
+
+  const email = String(options.email ?? "").trim();
+  // Convenience only: it prefills the checkout form. Matching never uses it.
+  if (email) url.searchParams.set("prefilled_email", email);
+
+  return {
+    success: true,
+    configured: true,
+    url: url.toString(),
+    // Callers may show this so an operator can confirm the right link is live.
+    plan: {
+      displayPrice: PLAN.displayPriceWithInterval,
+      amountCents: PLAN.amountCents,
+    },
+  };
+}
+
+/** Whether this deployment is set up to take payment without an API call. */
+function paymentLinkConfigured() {
+  return paymentLink().configured === true;
+}
+
+/**
  * Creates a Stripe-hosted Checkout Session for the fixed commercial plan.
  * @param {{successUrl: string, cancelUrl: string, email?: string, name?: string, actor?: object}} options
  */
@@ -552,6 +636,8 @@ async function resumeSubscription({ actor = null } = {}) {
 }
 
 module.exports = {
+  paymentLink,
+  paymentLinkConfigured,
   PLAN,
   STATUS,
   resolvePriceId,

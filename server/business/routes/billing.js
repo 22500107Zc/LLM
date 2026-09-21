@@ -6,6 +6,7 @@ const { configurationStatus } = require("../billing/stripe");
 const config = require("../config");
 const { requireCapability, safeHandler } = require("../middleware");
 const { invalidateAccessCache } = require("../middleware/billingGate");
+const prisma = require("../../utils/prisma");
 
 /**
  * Billing API.
@@ -55,6 +56,68 @@ function billingRoutes(router) {
     safeHandler(async (_request, response) => {
       const result = await service.listInvoices({ limit: 12 });
       response.status(200).json(result);
+    })
+  );
+
+  /**
+   * The Stripe-hosted Payment Link for this deployment.
+   *
+   * This is the preferred way to take payment: Stripe hosts the page and the
+   * application makes no outbound Stripe call, so nothing here can fail at
+   * the moment a customer is trying to pay. The returned URL carries this
+   * deployment's client_reference_id so the webhook can match the payment
+   * back without relying on the customer typing the right email.
+   */
+  router.get(
+    "/billing/payment-link",
+    [requireCapability("billing:view")],
+    safeHandler(async (request, response) => {
+      const email = request.query.email ?? null;
+      const result = service.paymentLink(email ? { email: String(email) } : {});
+      response.status(result.success ? 200 : 400).json(result);
+    })
+  );
+
+  /**
+   * Recent Stripe webhook events, including those that were refused or could
+   * not be matched.
+   *
+   * An unmatched payment is the one failure mode that silently costs a
+   * customer their access, so it has to be visible to a human rather than
+   * living only in a log line. No secret and no event payload is returned -
+   * only identifiers Stripe already shows in its own dashboard.
+   */
+  router.get(
+    "/billing/events",
+    [requireCapability("billing:view")],
+    safeHandler(async (request, response) => {
+      const limit = Math.min(Number(request.query.limit) || 50, 200);
+      const status = request.query.status ? String(request.query.status) : null;
+
+      const events = await prisma.billing_events.findMany({
+        ...(status ? { where: { status } } : {}),
+        orderBy: { id: "desc" },
+        take: limit,
+      });
+
+      const needsAttention = await prisma.billing_events.count({
+        where: { status: { in: ["unmatched", "rejected", "failed"] } },
+      });
+
+      response.status(200).json({
+        events: events.map((event) => ({
+          stripeEventId: event.stripe_event_id,
+          type: event.type,
+          status: event.status,
+          summary: event.summary,
+          occurredAt: event.occurredAt,
+          processedAt: event.processedAt,
+        })),
+        needsAttention,
+        // Useful to confirm the endpoint Stripe should be posting to. The
+        // signing secret is NEVER returned here.
+        webhookEndpoint: absoluteUrl(request, "/api/business/billing/webhook"),
+      });
     })
   );
 

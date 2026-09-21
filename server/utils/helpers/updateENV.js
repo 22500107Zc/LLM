@@ -1614,6 +1614,7 @@ function dumpENV() {
     // Deployment identity - losing this would let an unrelated Stripe event
     // bind this deployment to the wrong customer.
     "DEPLOYMENT_ID",
+    "STRIPE_PAYMENT_LINK",
 
     // Deployment
     "PUBLIC_URL",
