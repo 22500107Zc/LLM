@@ -11,6 +11,21 @@ import {
   Nut,
   Toolbox,
   Plugs,
+  // Business AI Operations Platform navigation icons.
+  ChartLine,
+  ChartBar,
+  Robot,
+  Globe,
+  BookOpen,
+  ChatCenteredText,
+  UserPlus,
+  MagnifyingGlass,
+  CheckCircle,
+  Clock,
+  UsersThree,
+  PlugsConnected,
+  ClipboardText,
+  CreditCard,
 } from "@phosphor-icons/react";
 import AgentIcon from "@/media/animations/agent-static.png";
 import CommunityHubIcon from "@/media/illustrations/community-hub.png";
@@ -187,16 +202,14 @@ export default function SettingsSidebar() {
 }
 
 function SupportEmail() {
-  const [supportEmail, setSupportEmail] = useState(paths.mailToMintplex());
+  const [supportEmail, setSupportEmail] = useState(paths.support());
   const { t } = useTranslation();
 
   useEffect(() => {
     const fetchSupportEmail = async () => {
       const supportEmail = await System.fetchSupportEmail();
       setSupportEmail(
-        supportEmail?.email
-          ? `mailto:${supportEmail.email}`
-          : paths.mailToMintplex()
+        supportEmail?.email ? `mailto:${supportEmail.email}` : paths.support()
       );
     };
     fetchSupportEmail();
@@ -216,6 +229,110 @@ const SidebarOptions = ({ user = null, t }) => (
   <CanViewChatHistoryProvider>
     {({ viewable: canViewChatHistory }) => (
       <>
+        {/*
+          Business AI Operations Platform navigation.
+          This is what an ordinary business user works in day to day; the
+          upstream infrastructure sections below it stay available to admins.
+        */}
+        <Option
+          btnText="Dashboard"
+          icon={<ChartLine className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.dashboard()}
+          user={user}
+        />
+        <Option
+          btnText="AI Agents"
+          icon={<Robot className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.agents()}
+          user={user}
+          roles={["admin", "manager"]}
+        />
+        <Option
+          btnText="Website Agent"
+          icon={<Globe className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.websiteAgents()}
+          user={user}
+          roles={["admin", "manager"]}
+        />
+        <Option
+          btnText="Knowledge"
+          icon={<BookOpen className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.knowledge()}
+          user={user}
+        />
+        <Option
+          btnText="Conversations"
+          icon={<ChatCenteredText className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.conversations()}
+          user={user}
+          roles={["admin", "manager"]}
+        />
+        <Option
+          btnText="Leads"
+          icon={<UserPlus className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.leads()}
+          user={user}
+          roles={["admin", "manager"]}
+        />
+        <Option
+          btnText="Analytics"
+          icon={<ChartBar className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.analytics()}
+          user={user}
+          roles={["admin", "manager"]}
+        />
+        <Option
+          btnText="Knowledge Gaps"
+          icon={<MagnifyingGlass className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.knowledgeGaps()}
+          user={user}
+          roles={["admin", "manager"]}
+        />
+        <Option
+          btnText="AI Quality"
+          icon={<CheckCircle className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.quality()}
+          user={user}
+          roles={["admin", "manager"]}
+        />
+        <Option
+          btnText="Automations"
+          icon={<Clock className="h-5 w-5 flex-shrink-0" />}
+          href={paths.settings.scheduledJobs()}
+          user={user}
+          roles={["admin"]}
+        />
+        <Option
+          btnText="Team"
+          icon={<UsersThree className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.team()}
+          user={user}
+          roles={["admin"]}
+        />
+        <Option
+          btnText="Integrations"
+          icon={<PlugsConnected className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.integrations()}
+          user={user}
+          roles={["admin"]}
+        />
+        <Option
+          btnText="Audit Log"
+          icon={<ClipboardText className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.auditLog()}
+          user={user}
+          roles={["admin"]}
+        />
+        <Option
+          btnText="Billing"
+          icon={<CreditCard className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.billing()}
+          user={user}
+          roles={["admin"]}
+        />
+
+        {/* Advanced platform configuration - administrators only. */}
+        <div className="my-3 border-t border-theme-sidebar-border" />
         <Option
           btnText={t("settings.ai-providers")}
           icon={<Gear className="h-5 w-5 flex-shrink-0" />}
@@ -515,14 +632,11 @@ function HoldToReveal({ children, holdForMs = 3_000 }) {
 function AppVersion() {
   const { version, isLoading } = useAppVersion();
   if (isLoading) return null;
+  // Rendered as plain text: a business deployment does not link its users to
+  // the upstream project's release notes.
   return (
-    <Link
-      to={`https://github.com/Mintplex-Labs/anything-llm/releases/tag/v${version}`}
-      target="_blank"
-      rel="noreferrer"
-      className="text-theme-text-secondary light:opacity-80 opacity-50 text-xs mx-3"
-    >
+    <span className="text-theme-text-secondary light:opacity-80 opacity-50 text-xs mx-3">
       v{version}
-    </Link>
+    </span>
   );
 }

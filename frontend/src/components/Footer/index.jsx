@@ -1,5 +1,4 @@
 import System from "@/models/system";
-import paths from "@/utils/paths";
 import {
   BookOpen,
   DiscordLogo,
@@ -16,8 +15,12 @@ import SettingsButton from "../SettingsButton";
 import { isMobile } from "react-device-detect";
 import { Tooltip } from "react-tooltip";
 import { Link } from "react-router-dom";
+import { supportMailto } from "@/business/brand";
 
 export const MAX_ICONS = 3;
+
+// The full icon set stays available for administrator-configured footer links;
+// only the *default* footer changed for the commercial build.
 export const ICON_COMPONENTS = {
   BookOpen: BookOpen,
   DiscordLogo: DiscordLogo,
@@ -46,57 +49,30 @@ export default function Footer() {
   if (footerData === false) return null;
 
   if (!Array.isArray(footerData) || footerData.length === 0) {
+    // Default footer for a business deployment: the customer's own support
+    // channel. Upstream community, documentation and marketing links are not
+    // shown to business users. Licence and attribution notices are preserved
+    // in the repository (LICENSE, NOTICE), not in customer-facing chrome.
+    const supportLink = supportMailto();
     return (
       <div className="flex justify-center mb-2">
         <div className="flex space-x-4">
-          <div className="flex w-fit">
-            <Link
-              to={paths.github()}
-              target="_blank"
-              rel="noreferrer"
-              className="transition-all duration-300 p-2 rounded-full bg-theme-sidebar-footer-icon hover:bg-theme-sidebar-footer-icon-hover"
-              aria-label="Find us on GitHub"
-              data-tooltip-id="footer-item"
-              data-tooltip-content="View Source Code"
-            >
-              <GithubLogo
-                weight="fill"
-                className="h-5 w-5 text-white light:text-slate-800"
-              />
-            </Link>
-          </div>
-          <div className="flex w-fit">
-            <Link
-              to={paths.docs()}
-              target="_blank"
-              rel="noreferrer"
-              className="transition-all duration-300 p-2 rounded-full bg-theme-sidebar-footer-icon hover:bg-theme-sidebar-footer-icon-hover"
-              aria-label="Docs"
-              data-tooltip-id="footer-item"
-              data-tooltip-content="Open AnythingLLM help docs"
-            >
-              <BookOpen
-                weight="fill"
-                className="h-5 w-5 text-white light:text-slate-800"
-              />
-            </Link>
-          </div>
-          <div className="flex w-fit">
-            <Link
-              to={paths.discord()}
-              target="_blank"
-              rel="noreferrer"
-              className="transition-all duration-300 p-2 rounded-full bg-theme-sidebar-footer-icon hover:bg-theme-sidebar-footer-icon-hover"
-              aria-label="Join our Discord server"
-              data-tooltip-id="footer-item"
-              data-tooltip-content="Join the AnythingLLM Discord"
-            >
-              <DiscordLogo
-                weight="fill"
-                className="h-5 w-5 text-white light:text-slate-800"
-              />
-            </Link>
-          </div>
+          {supportLink && (
+            <div className="flex w-fit">
+              <Link
+                to={supportLink}
+                className="transition-all duration-300 p-2 rounded-full bg-theme-sidebar-footer-icon hover:bg-theme-sidebar-footer-icon-hover"
+                aria-label="Contact support"
+                data-tooltip-id="footer-item"
+                data-tooltip-content="Contact support"
+              >
+                <Envelope
+                  weight="fill"
+                  className="h-5 w-5 text-white light:text-slate-800"
+                />
+              </Link>
+            </div>
+          )}
           {!isMobile && <SettingsButton />}
         </div>
         <Tooltip

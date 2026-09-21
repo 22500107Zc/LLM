@@ -18,7 +18,10 @@ export default function DataHandling({ setHeader, setForwardBtn, setBackBtn }) {
   }, []);
 
   function handleForward() {
-    navigate(paths.onboarding.survey());
+    // The upstream onboarding survey transmitted the operator's email and use
+    // case to a third-party endpoint. It is removed from the commercial build,
+    // so this is the final onboarding step.
+    navigate(paths.home());
   }
 
   function handleBack() {

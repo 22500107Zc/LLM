@@ -1,4 +1,5 @@
 import { API_BASE } from "./constants";
+import { supportEmail as brandSupportEmail } from "@/business/brand";
 
 /**
  * Check if a href matches the current pathname.
@@ -19,7 +20,7 @@ function applyOptions(path, options = {}) {
   return updatedPath;
 }
 
-export default {
+const paths = {
   home: () => {
     return "/";
   },
@@ -34,9 +35,6 @@ export default {
   onboarding: {
     home: () => {
       return "/onboarding";
-    },
-    survey: () => {
-      return "/onboarding/survey";
     },
     llmPreference: () => {
       return "/onboarding/llm-preference";
@@ -54,23 +52,52 @@ export default {
       return "/onboarding/data-handling";
     },
   },
+  /**
+   * Upstream community and marketing destinations are not shown to business
+   * customers. These helpers are retained so upstream components that import
+   * them keep working, but they resolve to the deployment's own support
+   * channel instead of upstream properties.
+   *
+   * Required third-party licence and attribution notices are preserved in the
+   * repository (LICENSE, NOTICE) - this only removes marketing surfaces.
+   */
+  support: () => {
+    const email = brandSupportEmail();
+    return email ? `mailto:${email}` : "#";
+  },
   github: () => {
-    return "https://github.com/Mintplex-Labs/anything-llm";
+    return paths.support();
   },
   discord: () => {
-    return "https://discord.com/invite/6UyHPeGZAC";
+    return paths.support();
   },
-  docs: (path = "") => {
-    return `https://docs.anythingllm.com${path}`;
+  docs: (_path = "") => {
+    return paths.support();
   },
   chatModes: () => {
-    return "https://docs.anythingllm.com/features/chat-modes";
+    return paths.support();
   },
   mailToMintplex: () => {
-    return "mailto:team@mintplexlabs.com";
+    return paths.support();
   },
   hosting: () => {
-    return "https://my.mintplexlabs.com/aio-checkout?product=anythingllm";
+    return paths.support();
+  },
+  /** The commercial business portal. */
+  business: {
+    dashboard: () => "/dashboard",
+    agents: () => "/agents",
+    websiteAgents: () => "/website-agents",
+    knowledge: () => "/knowledge",
+    conversations: () => "/conversations",
+    leads: () => "/leads",
+    analytics: () => "/analytics",
+    knowledgeGaps: () => "/knowledge-gaps",
+    quality: () => "/ai-quality",
+    team: () => "/team",
+    integrations: () => "/integrations",
+    auditLog: () => "/audit-log",
+    billing: () => "/settings/billing",
   },
   workspace: {
     chat: (slug, options = {}) => {
@@ -259,3 +286,5 @@ export default {
     },
   },
 };
+
+export default paths;

@@ -436,6 +436,124 @@ const router = createBrowserRouter([
           };
         },
       },
+      // ---------------------------------------------------------------
+      // Business AI Operations Platform
+      // The commercial portal. Every page is behind PrivateRoute, and the
+      // business API additionally enforces the per-capability role checks.
+      // ---------------------------------------------------------------
+      {
+        path: "/dashboard",
+        lazy: async () => {
+          const { default: BusinessDashboard } = await import(
+            "@/pages/Business/Dashboard"
+          );
+          return { element: <PrivateRoute Component={BusinessDashboard} /> };
+        },
+      },
+      {
+        path: "/agents",
+        lazy: async () => {
+          const { default: AgentsPage } = await import(
+            "@/pages/Business/Agents"
+          );
+          return { element: <ManagerRoute Component={AgentsPage} /> };
+        },
+      },
+      {
+        path: "/website-agents",
+        lazy: async () => {
+          const { default: WebsiteAgentsPage } = await import(
+            "@/pages/Business/WebsiteAgents"
+          );
+          return { element: <ManagerRoute Component={WebsiteAgentsPage} /> };
+        },
+      },
+      {
+        path: "/knowledge",
+        lazy: async () => {
+          const { default: KnowledgePage } = await import(
+            "@/pages/Business/Knowledge"
+          );
+          return { element: <PrivateRoute Component={KnowledgePage} /> };
+        },
+      },
+      {
+        path: "/conversations",
+        lazy: async () => {
+          const { default: ConversationsPage } = await import(
+            "@/pages/Business/Conversations"
+          );
+          return { element: <ManagerRoute Component={ConversationsPage} /> };
+        },
+      },
+      {
+        path: "/leads",
+        lazy: async () => {
+          const { default: LeadsPage } = await import("@/pages/Business/Leads");
+          return { element: <ManagerRoute Component={LeadsPage} /> };
+        },
+      },
+      {
+        path: "/analytics",
+        lazy: async () => {
+          const { default: AnalyticsPage } = await import(
+            "@/pages/Business/Analytics"
+          );
+          return { element: <ManagerRoute Component={AnalyticsPage} /> };
+        },
+      },
+      {
+        path: "/knowledge-gaps",
+        lazy: async () => {
+          const { default: KnowledgeGapsPage } = await import(
+            "@/pages/Business/KnowledgeGaps"
+          );
+          return { element: <ManagerRoute Component={KnowledgeGapsPage} /> };
+        },
+      },
+      {
+        path: "/ai-quality",
+        lazy: async () => {
+          const { default: QualityPage } = await import(
+            "@/pages/Business/Quality"
+          );
+          return { element: <ManagerRoute Component={QualityPage} /> };
+        },
+      },
+      {
+        path: "/team",
+        lazy: async () => {
+          const { default: TeamPage } = await import("@/pages/Business/Team");
+          return { element: <AdminRoute Component={TeamPage} /> };
+        },
+      },
+      {
+        path: "/integrations",
+        lazy: async () => {
+          const { default: IntegrationsPage } = await import(
+            "@/pages/Business/Integrations"
+          );
+          return { element: <AdminRoute Component={IntegrationsPage} /> };
+        },
+      },
+      {
+        path: "/audit-log",
+        lazy: async () => {
+          const { default: AuditLogPage } = await import(
+            "@/pages/Business/AuditLog"
+          );
+          return { element: <AdminRoute Component={AuditLogPage} /> };
+        },
+      },
+      {
+        path: "/settings/billing",
+        lazy: async () => {
+          const { default: BillingPage } = await import(
+            "@/pages/Business/Billing"
+          );
+          return { element: <AdminRoute Component={BillingPage} /> };
+        },
+      },
       // Catch-all route for 404s
       {
         path: "*",
