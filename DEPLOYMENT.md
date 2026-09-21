@@ -36,49 +36,142 @@ no Kubernetes requirement.
 
 ## 3. First deployment
 
+Every deployment is created and operated with one tool: `scripts/operator.sh`.
+It generates the secrets, writes the customer's configuration file, produces the
+reverse-proxy config, and keeps each customer separate from every other customer
+on the host. You do not need to edit Compose files or remember any commands
+beyond the ones below.
+
+Install the platform once per host:
+
 ```bash
-git clone <this-repo> /opt/platform-acme
-cd /opt/platform-acme
-
-cp docker/.env.production.example docker/.env
-
-# Generate the three required secrets
-printf 'JWT_SECRET=%s\nSIG_KEY=%s\nSIG_SALT=%s\n' \
-  "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" \
-  >> docker/.env
-
-# Fill in branding, customer identity, Stripe and the AI provider key
-$EDITOR docker/.env
-
-docker compose -f docker/docker-compose.production.yml up -d --build
-docker compose -f docker/docker-compose.production.yml logs -f
+git clone <this-repo> /opt/platform
+cd /opt/platform
 ```
 
-The container refuses to start if `JWT_SECRET`, `SIG_KEY` or `SIG_SALT` is
-missing or weak. That is deliberate.
+### Provision a customer
 
-Wait for:
+Pick a **slug** (lowercase short name, e.g. `acme`), the **domain** they will
+use, and a **port** on this host that no other customer uses (3101, 3102, 3103…).
 
+```bash
+cd /opt/platform
+./scripts/operator.sh provision acme --domain acme.yourdomain.com --port 3101 --name "Acme Corporation"
 ```
-[Platform] Acme AI Operations v1.16.1 - Acme Corporation
-Primary server in HTTP mode listening on port 3001
+
+This creates `deployments/acme/` containing:
+
+| File | What it is |
+| --- | --- |
+| `.env` | The customer's configuration and secrets, written `0600` |
+| `caddy.conf` | Ready-to-install reverse-proxy config (Caddy) |
+| `nginx.conf` | The same, for nginx |
+| `backups/` | Where this customer's backups are written |
+
+`DEPLOYMENT_ID`, `JWT_SECRET`, `SIG_KEY`, `SIG_SALT` and `HEALTHCHECK_TOKEN` are
+generated on the host and never printed to the screen. The tool refuses to
+provision if the slug, port or domain is already taken by another deployment, or
+if anything else on the host already holds that port.
+
+To see exactly what would happen without changing anything, add `--dry-run` to
+any command.
+
+### Fill in the customer's details
+
+```bash
+$EDITOR deployments/acme/.env
 ```
+
+Set at minimum:
+
+- `SUPPORT_EMAIL` — where their staff should write for help
+- the AI provider key (`OPEN_AI_KEY`, or the equivalent for their provider)
+- the Stripe values from §7, once the subscription exists
+
+Then confirm the configuration is still valid:
+
+```bash
+./scripts/operator.sh check acme
+```
+
+### Install the reverse proxy and start it
+
+```bash
+sudo cp deployments/acme/caddy.conf /etc/caddy/sites/acme.conf && sudo systemctl reload caddy
+./scripts/operator.sh update acme
+```
+
+`update` backs up first, builds, starts, and then waits until the deployment
+answers its health check. It tells you plainly if it does not come up.
+
+### Check it
+
+```bash
+./scripts/operator.sh status acme     # one customer
+./scripts/operator.sh list            # every customer on this host
+```
+
+### Adding the second, third, tenth customer
+
+Exactly the same command with a different slug, domain and port:
+
+```bash
+./scripts/operator.sh provision globex --domain globex.yourdomain.com --port 3102 --name "Globex"
+```
+
+Each customer gets its own Compose project, container, storage volumes, backups
+and configuration file. One customer's build, restart, backup, restore or
+failure cannot touch another's.
 
 ### Create the owner account
 
-Open `https://customer.yourdomain.com` and complete the first-run flow. The
-first account created becomes an administrator; promote it to **Owner** on the
-Team page.
+Open `https://acme.yourdomain.com` and complete the first-run flow. The first
+account created becomes an administrator; promote it to **Owner** on the Team
+page.
 
 Until multi-user mode is enabled, production blocks every non-bootstrap route
 with `401`. This is the guard that prevents an unconfigured deployment from
-serving the whole application anonymously.
+serving the whole application anonymously. The container also refuses to start
+if `DEPLOYMENT_ID`, `JWT_SECRET`, `SIG_KEY` or `SIG_SALT` is missing or weak.
+That is deliberate.
+
+### Every command, in one place
+
+| Command | What it does |
+| --- | --- |
+| `./scripts/operator.sh provision <slug> --domain <d> --port <p>` | Create a new customer deployment |
+| `./scripts/operator.sh check <slug>` | Validate configuration, secrets and file permissions |
+| `./scripts/operator.sh update <slug>` | Back up, rebuild, restart, wait for health |
+| `./scripts/operator.sh status <slug>` | Show one customer's state |
+| `./scripts/operator.sh list` | Show every customer on this host |
+| `./scripts/operator.sh backup <slug>` | Back up that customer's data |
+| `./scripts/operator.sh restore-test <slug>` | Prove the newest backup restores — live deployment untouched |
+| `./scripts/operator.sh suspend <slug>` | Stop the containers; data is kept |
+| `./scripts/operator.sh resume <slug>` | Start them again |
+| `./scripts/operator.sh logs <slug>` | Follow the logs |
+| `./scripts/operator.sh remove-containers <slug>` | Remove containers only; volumes, backups and `.env` are kept |
+
+Add `--dry-run` to any of them to see what it would do.
+
+**There is no command that deletes customer data.** That is deliberate. Removing
+a customer's data is a manual, deliberate act performed by a human who has
+confirmed the contract has ended and a final backup exists.
+
+### Never commit a customer's configuration
+
+`deployments/` and `backups/` are excluded from Git. The `.env` file holds that
+customer's secrets. Back it up somewhere safe and encrypted — without it, their
+stored integration credentials cannot be read back after a restore.
 
 ---
 
 ## 4. Reverse proxy and HTTPS
 
-The container listens on `127.0.0.1:3001` only. TLS terminates at the proxy.
+The container listens on loopback only, on the port you chose for that
+customer (`127.0.0.1:3101` for `acme` above). TLS terminates at the proxy.
+`operator.sh provision` already wrote a correct config for the customer's
+domain and port to `deployments/<slug>/caddy.conf` and `nginx.conf`; the
+templates below are what they contain.
 
 ### Caddy (recommended — automatic certificates)
 
@@ -204,13 +297,15 @@ configured price does not equal $3,888.88/month.
 ## 8. Backups
 
 ```bash
-# Manual
-STORAGE_DIR=/var/lib/docker/volumes/business-ai-platform_platform-storage/_data \
-  ./scripts/backup.sh /opt/backups/acme
+# Manual, for one customer
+./scripts/operator.sh backup acme
 
-# Nightly at 02:30
-30 2 * * * cd /opt/platform-acme && STORAGE_DIR=... ./scripts/backup.sh /opt/backups/acme >> /var/log/platform-backup.log 2>&1
+# Nightly at 02:30, every customer on this host
+30 2 * * * cd /opt/platform && for c in $(ls deployments); do ./scripts/operator.sh backup "$c"; done >> /var/log/platform-backup.log 2>&1
 ```
+
+Backups land in `deployments/<slug>/backups/` and contain only that customer's
+data and configuration.
 
 Backs up the database, documents, vector data, encryption keys and `.env`.
 Excludes model caches and scratch directories.
@@ -220,22 +315,27 @@ Store it encrypted and off-host.
 
 ### Restore
 
+Prove a backup is restorable **before** you need it. This extracts the newest
+archive to a throwaway directory and verifies it; the live deployment is never
+touched:
+
 ```bash
-./scripts/restore.sh /opt/backups/acme/backup-<timestamp>.tar.gz --force
-cd server && npx prisma migrate deploy
-docker compose -f docker/docker-compose.production.yml restart
+./scripts/operator.sh restore-test acme
+```
+
+To perform a real restore:
+
+```bash
+./scripts/operator.sh suspend acme
+./scripts/restore.sh deployments/acme/backups/backup-<timestamp>.tar.gz --force
+cd server && npx prisma migrate deploy && cd ..
+./scripts/operator.sh resume acme
 ```
 
 Restore moves any existing storage aside to `storage.pre-restore.<timestamp>`
 rather than deleting it, and refuses to overwrite a non-empty directory without
 `--force`. Configuration files are extracted as `restored-*.env` for review
 rather than applied automatically.
-
-Test a restore into a scratch directory before you need one:
-
-```bash
-./scripts/restore.sh <archive> --target /tmp/restore-test
-```
 
 ---
 
@@ -303,10 +403,18 @@ Neither endpoint exposes credentials, connection strings or filesystem paths.
 ## 11. Updates
 
 ```bash
-cd /opt/platform-acme
-STORAGE_DIR=... ./scripts/backup.sh /opt/backups/acme    # always back up first
+cd /opt/platform
 git pull
-docker compose -f docker/docker-compose.production.yml up -d --build
+./scripts/operator.sh update acme
+```
+
+`update` backs up that customer first, then rebuilds, restarts and waits for the
+health check. Update one customer at a time so a bad release never takes every
+customer down at once:
+
+```bash
+./scripts/operator.sh update acme      # verify it, then
+./scripts/operator.sh update globex
 ```
 
 Migrations run automatically at container start.
@@ -324,3 +432,6 @@ Migrations run automatically at container start.
 | Billing state looks stale | A webhook was missed | **Billing → Refresh from Stripe** |
 | Stripe webhook 400s | Wrong `STRIPE_WEBHOOK_SECRET` | Recopy from the Stripe dashboard endpoint |
 | Uploads fail at ~1 MB | Proxy body limit | `client_max_body_size 3G` |
+| `COMPOSE_PROJECT_NAME is required` | Compose was run directly | Use `./scripts/operator.sh <command> <slug>` |
+| `Port N is already in use` | Another customer or service holds it | Choose a different `--port` |
+| Deployment does not become healthy | Build or configuration failure | `./scripts/operator.sh logs <slug>` |

@@ -1,24 +1,32 @@
 # Production deployment for the managed Business AI Operations Platform.
 #
-# One business = one dedicated deployment. This file runs a single isolated
-# application container with its own database, documents, vector data and
-# configuration on a persistent volume.
+# ONE BUSINESS = ONE DEDICATED DEPLOYMENT. Every identity below is
+# parameterized so a single host can run several customers side by side with
+# no shared state and no collisions.
 #
-#   docker compose -f docker/docker-compose.production.yml up -d --build
+# Do not invoke this directly; the operator CLI sets and validates everything:
 #
-# TLS is expected to terminate at a reverse proxy in front of this container
-# (see DEPLOYMENT.md). The container itself speaks plain HTTP on 3001 and is
-# bound to localhost so it is never directly reachable from the internet.
+#   ./scripts/operator.sh provision acme --domain acme.yourdomain.com --port 3101
+#   ./scripts/operator.sh status acme
+#
+# Required in the environment when invoked manually:
+#   COMPOSE_PROJECT_NAME, CUSTOMER_SLUG, HOST_PORT, ENV_FILE
+#
+# TLS terminates at a reverse proxy in front of this container (see
+# DEPLOYMENT.md); the container itself speaks plain HTTP on loopback only.
 
-name: business-ai-platform
+name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required (use scripts/operator.sh)}
 
 networks:
+  # Per-project network: customers never share a bridge.
   platform:
     driver: bridge
 
 services:
   platform:
-    container_name: business-ai-platform
+    # Deliberately no fixed container_name - a fixed name collides the moment a
+    # second customer is deployed on the same host. Compose derives a unique
+    # name from the project.
     build:
       context: ../.
       dockerfile: ./docker/Dockerfile
@@ -27,6 +35,10 @@ services:
         ARG_GID: ${GID:-1000}
 
     restart: unless-stopped
+
+    labels:
+      com.platform.customer: ${CUSTOMER_SLUG:?CUSTOMER_SLUG is required}
+      com.platform.domain: ${CUSTOMER_DOMAIN:-unset}
 
     # --- security -----------------------------------------------------------
     # Upstream's compose grants SYS_ADMIN so Chromium's sandbox can run for web
@@ -44,9 +56,10 @@ services:
     user: "${UID:-1000}:${GID:-1000}"
 
     # --- networking ---------------------------------------------------------
-    # Bound to loopback: the reverse proxy is the only way in.
+    # Loopback only, on a port unique to this customer. The reverse proxy for
+    # this customer's domain is the only way in.
     ports:
-      - "127.0.0.1:3001:3001"
+      - "127.0.0.1:${HOST_PORT:?HOST_PORT is required}:3001"
     networks:
       - platform
     extra_hosts:
@@ -54,16 +67,22 @@ services:
 
     # --- configuration and persistence --------------------------------------
     env_file:
-      - .env
+      - ${ENV_FILE:?ENV_FILE is required}
     environment:
       NODE_ENV: production
       STORAGE_DIR: /app/server/storage
+      # Set explicitly so the staging directory does not depend on the storage
+      # layout, and so this customer's database file is unambiguous.
+      COLLECTOR_HOTDIR: /app/collector/hotdir
+      DATABASE_URL: file:/app/server/storage/anythingllm.db
     volumes:
+      # Compose names these per project, so each customer's data is its own
+      # volume and one customer's restore can never reach another's.
       - platform-storage:/app/server/storage
       - platform-hotdir:/app/collector/hotdir
       - platform-outputs:/app/collector/outputs
       # Backups are written here by scripts/backup.sh running on the host.
-      - ./backups:/app/backups
+      - ${BACKUP_PATH:-./backups}:/app/backups
 
     # --- health and resources ------------------------------------------------
     healthcheck:
@@ -79,14 +98,14 @@ services:
         max-size: "20m"
         max-file: "5"
 
-    # Guard rails so one runaway request cannot take down the host. Raise these
-    # for a customer with a large corpus.
+    # Guard rails so one customer's runaway request cannot take down the host,
+    # or the other customers on it.
     deploy:
       resources:
         limits:
-          memory: 8G
+          memory: ${MEMORY_LIMIT:-8G}
         reservations:
-          memory: 2G
+          memory: ${MEMORY_RESERVATION:-2G}
 
 volumes:
   platform-storage:

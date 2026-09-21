@@ -46,8 +46,10 @@ teardown() {
   [ -n "$SERVER_PID" ] && kill -9 "$SERVER_PID" 2>/dev/null
   [ -n "$COLLECTOR_PID" ] && kill -9 "$COLLECTOR_PID" 2>/dev/null
   if [ -n "$COMPOSE_PROJECT" ]; then
-    docker compose -p "$COMPOSE_PROJECT" \
-      -f "$ROOT/docker/docker-compose.production.yml" down -v >/dev/null 2>&1
+    COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT" CUSTOMER_SLUG="$COMPOSE_PROJECT" \
+    HOST_PORT="$PORT" ENV_FILE="$WORK_DIR/.env" \
+      docker compose -p "$COMPOSE_PROJECT" \
+        -f "$ROOT/docker/docker-compose.production.yml" down -v >/dev/null 2>&1
   fi
   # The temporary storage holds only generated fixtures and throwaway secrets.
   rm -rf "$WORK_DIR"
@@ -110,10 +112,13 @@ mkdir -p "$WORK_DIR/storage" "$WORK_DIR/hotdir" "$WORK_DIR/fixtures"
 
 # --- start the environment --------------------------------------------------
 if [ "$MODE" = "docker" ]; then
-  COMPOSE_PROJECT="acceptance-$STAMP"
+  # A project name of its own, so this throwaway environment can never collide
+  # with, or be mistaken for, a customer deployment.
+  COMPOSE_PROJECT="acceptance-$(printf '%s' "$STAMP" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9-')"
   log "Building and starting containers (project $COMPOSE_PROJECT)…"
-  CUSTOMER_SLUG="$COMPOSE_PROJECT" HOST_PORT="$PORT" ENV_FILE="$ENV_FILE" \
-  STORAGE_VOLUME="$WORK_DIR/storage" BACKUP_PATH="$WORK_DIR/backups" \
+  COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT" CUSTOMER_SLUG="$COMPOSE_PROJECT" \
+  HOST_PORT="$PORT" ENV_FILE="$ENV_FILE" CUSTOMER_DOMAIN="acceptance.example.invalid" \
+  BACKUP_PATH="$WORK_DIR/backups" \
     docker compose -p "$COMPOSE_PROJECT" \
       -f "$ROOT/docker/docker-compose.production.yml" up -d --build \
       > "$RESULTS_DIR/compose-up.log" 2>&1

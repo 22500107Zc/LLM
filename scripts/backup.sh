@@ -76,7 +76,12 @@ for FILE in comkey plugins; do
   [ -e "$STORAGE_DIR/$FILE" ] && cp -R "$STORAGE_DIR/$FILE" "$STAGING/payload/$FILE"
 done
 
-for ENV_FILE in "$ROOT/server/.env" "$ROOT/docker/.env"; do
+# Which configuration files to include. A dedicated deployment overrides this
+# so one customer's archive can never pick up another deployment's, or the
+# repository's, configuration.
+ENV_FILES_TO_INCLUDE="${BACKUP_ENV_FILES:-$ROOT/server/.env $ROOT/docker/.env}"
+
+for ENV_FILE in $ENV_FILES_TO_INCLUDE; do
   if [ -f "$ENV_FILE" ]; then
     log "Including configuration: $(basename "$(dirname "$ENV_FILE")")/.env"
     mkdir -p "$STAGING/payload/config"

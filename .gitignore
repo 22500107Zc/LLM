@@ -18,3 +18,8 @@ docker/.env
 
 # Test run output (evidence only; never part of the runtime image)
 test-results/
+
+# Dedicated customer deployments: generated .env files (secrets), reverse-proxy
+# configs and backups. Never commit any of this.
+deployments/
+backups/
