@@ -3,9 +3,9 @@
 Managed Business AI Operations Platform — $3,888.88 per month, one business per
 dedicated deployment.
 
-**Verification run:** `20260921T145511Z`
-**Commit under test:** `56ff9589d6da9e187c8212037eeef3be35f7f402`
-**Evidence:** `test-results/20260921T145511Z/` (excluded from Git and from the
+**Verification run:** `20260921T190412Z`
+**Commit under test:** `41608f6` (return-on-subscription pass)
+**Evidence:** `test-results/20260921T190412Z/` (excluded from Git and from the
 runtime image; reproduce with `./scripts/final-verification.sh`)
 
 Every result below was produced by running the gate in this pass. Nothing is
@@ -23,9 +23,9 @@ not observed passing.
 | **PASS** | frontend lint | `lint-frontend.log` |
 | **PASS** | collector lint | `lint-collector.log` |
 | **PASS** | frontend production build | `frontend-build.log` |
-| **FAIL** | unit tests — 1433 of 1436 pass; the 3 failures are the ffmpeg tests below | `unit-tests.log` |
+| **FAIL** | unit tests — 1460 of 1463 pass; the 3 failures are the ffmpeg tests below | `unit-tests.log` |
 | **PASS** | the 3 ffmpeg failures reproduce identically on untouched upstream | `ffmpeg-baseline.log` |
-| **PASS** | business, billing, Stripe binding and value tests — 341 tests | `business-tests.log` |
+| **PASS** | business, billing, Stripe binding and value tests — 368 tests | `business-tests.log` |
 | **PASS** | adversarial answer-grading tests | `grading-tests.log` |
 | **PASS** | zero critical advisories in production dependencies | `audit-summary.log` |
 | **PASS** | Compose config resolves, and fails loudly when a variable is missing | `compose-config.log` |
@@ -34,6 +34,8 @@ not observed passing.
 | **PASS** | restart persistence — data identical before and after | `disposable.log` |
 | **PASS** | backup and restore into a clean target | `disposable.log` |
 | **PASS** | desktop and mobile visual check of 9 pages — 46/46 | `disposable.log`, `live-run/screenshots/` |
+| **PASS** | Value page and calculator with real figures, desktop and phone — 26/26 | `live-run/value-visual.log` |
+| **PASS** | backup-before-update gating, in isolation — 18/18 | `scripts/operator-backup-test.sh` |
 | **PASS** | no customer-visible upstream branding in source | `branding-search.log` |
 | **PASS** | no hardcoded developer paths | `hardcoded-paths.log` |
 | **PASS** | no fixed credentials in the test scripts | `fixed-credentials.log` |
@@ -42,7 +44,7 @@ not observed passing.
 | **BLOCKED** | provider-backed answer correctness | needs a model provider API key |
 | **BLOCKED** | fresh container boot | needs a Docker daemon |
 
-**19 passed · 1 failed · 3 blocked.**
+**19 passed · 1 failed · 3 blocked**, plus the two suites above run directly.
 
 ---
 
@@ -86,9 +88,15 @@ mistakes "not run" for "passed".
 
 | Blocked gate | What it needs | How to run it |
 | --- | --- | --- |
-| Stripe test-mode lifecycle | A Stripe **test-mode** secret key | `STRIPE_SECRET_KEY=sk_test_... node scripts/stripe-test-mode-verification.cjs` (the script refuses any `sk_live_` key) |
+| Stripe webhook handling (**simulated** — self-signed events) | A Stripe **test-mode** secret key | `STRIPE_SECRET_KEY=sk_test_... node scripts/stripe-test-mode-verification.cjs` |
+| Genuine Stripe checkout, subscription, paid invoice and real event delivery | Test-mode key, price id, and either the `stripe` CLI or a configured webhook endpoint | `BASE_URL=... STRIPE_SECRET_KEY=sk_test_... STRIPE_PRICE_ID=price_... TEST_USER=... TEST_PASSWORD=... STRIPE_CLI=1 node scripts/stripe-live-test-checkout.cjs` |
 | Provider-backed answer correctness | A model provider API key | `OPEN_AI_KEY=... ./scripts/run-disposable-acceptance.sh` |
-| Fresh container boot | A Docker daemon | `MODE=docker ./scripts/run-disposable-acceptance.sh` |
+| Production Docker image build and boot | A Docker daemon | `./scripts/docker-image-verification.sh` |
+
+Both Stripe scripts refuse any `sk_live_` key outright. The two Stripe entries
+are deliberately separate: the first tests **this application's** handling of
+events it signs itself, and proves nothing about Stripe. The second uses only
+objects Stripe created and only events Stripe sent.
 
 Until a provider key runs that suite, what is verified is that the endpoints,
 retrieval, attribution, isolation, persistence and refusal *plumbing* work. The
@@ -189,6 +197,8 @@ proved to be upstream's and environmental.
 **This is a verdict on the software. It is not a statement about business
 return.** Passing tests say the product works. They say nothing about what any
 particular customer will get back — that is measured per customer, from their
-own records, on the Value page, after the product has been in use. The Value
-page reports whatever that turns out to be; it sets no target and issues no
-verdict, so there is no commercial pass or fail for this release to report.
+own records, on the Value page, after the product has been in use.
+
+The Value page reports whatever that turns out to be. It sets no target, issues
+no verdict, and treats 30x, 82x and 0.4x alike as results rather than grades,
+so there is no commercial pass or fail for this release to report.
