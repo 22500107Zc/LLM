@@ -42,12 +42,34 @@ reverse-proxy config, and keeps each customer separate from every other customer
 on the host. You do not need to edit Compose files or remember any commands
 beyond the ones below.
 
-Install the platform once per host:
+Install the platform once per host.
+
+**A default clone gives you the wrong code.** This repository's default branch
+is upstream AnythingLLM; the commercial application lives on its own branch.
+Clone that branch explicitly:
 
 ```bash
-git clone <this-repo> /opt/platform
+git clone --branch claude/commercial-b2b-ai-platform-0skp39 \
+  https://github.com/22500107Zc/LLM.git /opt/platform
 cd /opt/platform
 ```
+
+Or pin a known release commit, which is what to do for a customer:
+
+```bash
+git clone https://github.com/22500107Zc/LLM.git /opt/platform
+cd /opt/platform
+git checkout <release-commit-sha>
+```
+
+Confirm you have the commercial application before going further — these files
+exist only on the commercial branch:
+
+```bash
+ls server/business/config.js scripts/operator.sh && echo "commercial code present"
+```
+
+If that fails, you are on upstream master and nothing below will work.
 
 ### Provision a customer
 
@@ -94,15 +116,71 @@ Then confirm the configuration is still valid:
 ./scripts/operator.sh check acme
 ```
 
-### Install the reverse proxy and start it
+### Install the reverse proxy
+
+`provision` writes the config; it does not install it. Copying the file is not
+enough on a default install — Caddy does not read a `sites/` directory unless
+its main Caddyfile imports one.
+
+**Prerequisites:** a DNS `A`/`AAAA` record for the customer's domain already
+pointing at this host, and ports 80 and 443 reachable. Caddy needs both to
+obtain a certificate.
+
+**Caddy — first time on this host only:**
 
 ```bash
-sudo cp deployments/acme/caddy.conf /etc/caddy/sites/acme.conf && sudo systemctl reload caddy
+sudo apt install -y caddy                     # if not already installed
+sudo mkdir -p /etc/caddy/sites
+# Make Caddy read the per-customer directory, once:
+grep -q 'import sites/\*' /etc/caddy/Caddyfile \
+  || echo 'import sites/*' | sudo tee -a /etc/caddy/Caddyfile
+```
+
+**Caddy — for each customer:**
+
+```bash
+sudo cp deployments/acme/caddy.conf /etc/caddy/sites/acme.conf
+sudo caddy validate --config /etc/caddy/Caddyfile   # check before reloading
+sudo systemctl reload caddy
+```
+
+**nginx — for each customer:**
+
+```bash
+sudo cp deployments/acme/nginx.conf /etc/nginx/sites-available/acme.conf
+sudo ln -sf /etc/nginx/sites-available/acme.conf /etc/nginx/sites-enabled/acme.conf
+sudo nginx -t                                        # check before reloading
+sudo systemctl reload nginx
+```
+
+The nginx config expects a certificate at
+`/etc/letsencrypt/live/<domain>/`. Obtain one first, or nginx will fail to
+reload:
+
+```bash
+sudo certbot certonly --nginx -d acme.yourdomain.com
+```
+
+Caddy obtains and renews its own certificate; nothing extra is needed there.
+
+**Confirm the proxy is actually serving the customer's domain:**
+
+```bash
+curl -fsS -o /dev/null -w '%{http_code}\n' https://acme.yourdomain.com/api/ping
+```
+
+`401` or `200` means the proxy is reaching the deployment. A connection error
+or `502` means it is not — check the proxy's logs before going further.
+
+### Start it
+
+```bash
 ./scripts/operator.sh update acme
 ```
 
-`update` backs up first, builds, starts, and then waits until the deployment
-answers its health check. It tells you plainly if it does not come up.
+`update` backs up first — and **stops if that backup fails** — then builds,
+starts, and waits until the deployment reports ready through its health probe,
+not merely until the port answers. It tells you plainly if it does not come up.
 
 ### Check it
 
@@ -305,7 +383,20 @@ configured price does not equal $3,888.88/month.
 ```
 
 Backups land in `deployments/<slug>/backups/` and contain only that customer's
-data and configuration.
+data and configuration: the database, documents, vector data, the encryption
+material, and that deployment's own `.env`.
+
+By default `backup` briefly stops **only that one customer** so the snapshot is
+consistent — a tar of a live SQLite file can capture a half-written page and
+restore to a corrupt database. The pause lasts as long as the copy and the
+customer is started again immediately, including if the backup fails. Add
+`--online` to skip the pause; the archive's manifest then records that it is an
+online copy rather than a consistent snapshot.
+
+`update` takes a backup **first and stops if it fails.** An existing deployment
+is never rebuilt without one. A brand-new deployment with no data yet proceeds
+without a backup, because there is nothing to lose. `--skip-backup` overrides
+the stop and says plainly that you are accepting the risk.
 
 Backs up the database, documents, vector data, encryption keys and `.env`.
 Excludes model caches and scratch directories.
@@ -323,19 +414,31 @@ touched:
 ./scripts/operator.sh restore-test acme
 ```
 
-To perform a real restore:
+`restore-test` does more than check that a file exists: it extracts into
+isolated temporary storage, runs SQLite's own `integrity_check`, then opens the
+restored database and reads real rows out of it. It also confirms the archive
+contains the deployment's configuration, without which a restored deployment
+could not read back its stored integration secrets.
+
+To perform a real restore into the customer's own Docker volume:
 
 ```bash
-./scripts/operator.sh suspend acme
-./scripts/restore.sh deployments/acme/backups/backup-<timestamp>.tar.gz --force
-cd server && npx prisma migrate deploy && cd ..
-./scripts/operator.sh resume acme
+./scripts/operator.sh restore acme                                   # newest backup
+./scripts/operator.sh restore acme deployments/acme/backups/backup-<timestamp>.tar.gz
 ```
 
-Restore moves any existing storage aside to `storage.pre-restore.<timestamp>`
-rather than deleting it, and refuses to overwrite a non-empty directory without
-`--force`. Configuration files are extracted as `restored-*.env` for review
-rather than applied automatically.
+It asks you to type the customer slug, takes a safety backup of what is there
+now, stops that customer, writes the restored data into **that customer's**
+volume (`platform-<slug>_platform-storage`), and starts it again.
+
+The previous contents are moved aside **inside the volume** to
+`.pre-restore-<timestamp>` rather than deleted, so a bad restore is still
+recoverable. The archive's `config/<slug>.env` is **not** applied
+automatically — compare it with `deployments/<slug>/.env` yourself first.
+
+`scripts/restore.sh` is for a non-Docker install restoring into a host
+directory. Do not use it against a Docker deployment: it writes to a filesystem
+path, not to the customer's volume.
 
 ---
 

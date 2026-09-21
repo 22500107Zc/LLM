@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Moves this repository's commercial history to a PRIVATE GitHub repository and
-# then removes the commercial branch from the public fork.
+# COPIES this repository's commercial history to a PRIVATE GitHub repository
+# and verifies the copy. It deletes nothing.
 #
 # Why this exists: 22500107Zc/LLM is a *public fork* of
 # Mintplex-Labs/anything-llm. GitHub does not allow a fork's visibility to be
@@ -14,15 +14,26 @@
 #
 #   ./scripts/migrate-to-private-repo.sh --dry-run <owner>/<new-private-repo>
 #
+# Removing the public copy is a SEPARATE, explicit action:
+#
+#   ./scripts/migrate-to-private-repo.sh --remove-public <owner>/<private-repo>
+#
+# What deleting the public branch does and does not do:
+#   It removes the branch from the public repository. It does NOT retract
+#   commits that were already published - forks, clones, GitHub's own cached
+#   commit views and third-party mirrors may still hold them. Treat anything
+#   that was public as public. A private repository protects FUTURE work; it
+#   does not un-publish past work.
+#
 # What it does, in order:
 #   1. Refuses unless the target repository exists AND is private.
 #   2. Pushes every branch and tag to it.
 #   3. Verifies commit parity - twice, independently.
 #   4. Repoints this clone's `origin` at the private repository.
-#   5. Only then deletes the commercial branch from the public fork.
 #
-# It never deletes anything until both parity checks have passed, so there is
-# never a moment where the commercial history exists in only one place.
+# It deletes nothing unless --remove-public is given, and even then only after
+# both parity checks have passed, so the commercial history is never in only
+# one place.
 #
 set -uo pipefail
 
@@ -44,10 +55,12 @@ run() {
   "$@"
 }
 
+REMOVE_PUBLIC=0
 ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
+    --remove-public) REMOVE_PUBLIC=1 ;;
     *) ARGS+=("$arg") ;;
   esac
 done
@@ -102,7 +115,10 @@ verify_parity() {
 }
 
 if [ "$DRY_RUN" = "1" ]; then
-  info "Would verify commit parity twice, then repoint origin and delete the public branch."
+  info "Would verify commit parity twice, then repoint origin."
+  [ "$REMOVE_PUBLIC" = "1" ] \
+    && warn "Would then delete the public commercial branch (--remove-public)." \
+    || info "Would delete nothing. Pass --remove-public to remove the public branch."
   exit 0
 fi
 
@@ -123,10 +139,33 @@ git -C "$ROOT" remote set-url origin "https://github.com/$TARGET.git"
 git -C "$ROOT" remote remove private
 ok "origin is now $(git -C "$ROOT" remote get-url origin)"
 
-# ------------------------------- 5. remove the public commercial copy last --
+# ------------------- optional, explicit: remove the public commercial copy --
 PUBLIC_SLUG="$(printf '%s' "$PUBLIC_REMOTE_URL" | sed -E 's#.*github.com[:/]##; s#\.git$##')"
-warn "Deleting branch '$COMMERCIAL_BRANCH' from the PUBLIC repository $PUBLIC_SLUG."
+
+if [ "$REMOVE_PUBLIC" != "1" ]; then
+  echo
+  ok "Copy complete and verified. Nothing was deleted."
+  echo "  Private repository : https://github.com/$TARGET (private)"
+  echo "  Branch             : $COMMERCIAL_BRANCH at $LOCAL_SHA"
+  echo "  Public fork        : https://github.com/$PUBLIC_SLUG (unchanged)"
+  echo
+  info "To remove the public commercial branch, run this again with --remove-public."
+  warn "Removing it hides the branch from the public repository. It does NOT retract"
+  warn "commits that were already published: forks, clones and cached views may keep"
+  warn "them. A private repository protects future work, not past work."
+  echo
+  warn "Never give the private repository URL to a customer."
+  exit 0
+fi
+
+echo
+warn "About to delete branch '$COMMERCIAL_BRANCH' from the PUBLIC repository $PUBLIC_SLUG."
 warn "Its 'master' is untouched upstream code and stays as an ordinary fork."
+warn "This hides the branch. It does not retract already-published commits."
+printf "Type the public repository name to confirm (%s): " "$PUBLIC_SLUG"
+read -r confirmation
+[ "$confirmation" = "$PUBLIC_SLUG" ] || die "Confirmation did not match. Nothing was deleted."
+
 api "repos/$PUBLIC_SLUG/git/refs/heads/$COMMERCIAL_BRANCH" DELETE >/dev/null \
   && ok "Public commercial branch removed." \
   || die "Could not delete the public branch. The private copy is complete and verified; remove the public branch by hand."
@@ -137,4 +176,7 @@ echo "  Private repository : https://github.com/$TARGET (private)"
 echo "  Branch             : $COMMERCIAL_BRANCH at $LOCAL_SHA"
 echo "  Public fork        : https://github.com/$PUBLIC_SLUG (upstream code only)"
 echo
-warn "Never give this repository URL to a customer."
+warn "Commits published before this point may still exist in forks, clones and"
+warn "caches. Rotate anything that was ever a real secret rather than assuming"
+warn "deletion retracted it."
+warn "Never give the private repository URL to a customer."

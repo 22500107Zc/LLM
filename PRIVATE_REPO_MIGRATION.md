@@ -55,8 +55,15 @@ export GITHUB_TOKEN=<a token with repo scope>
 # See exactly what it would do, change nothing:
 ./scripts/migrate-to-private-repo.sh --dry-run 22500107Zc/business-ai-operations-platform
 
-# Do it:
+# Copy and verify. This deletes nothing:
 ./scripts/migrate-to-private-repo.sh 22500107Zc/business-ai-operations-platform
+```
+
+Once you are satisfied the private copy is complete, removing the public
+branch is a separate, explicit step:
+
+```bash
+./scripts/migrate-to-private-repo.sh --remove-public 22500107Zc/business-ai-operations-platform
 ```
 
 The script:
@@ -69,10 +76,22 @@ The script:
    commit count — and confirms `LICENSE` and `NOTICE` are present in the
    pushed history.
 4. Repoints this clone's `origin` at the private repository.
-5. **Only then** deletes the commercial branch from the public fork.
+5. Stops there. **It deletes nothing** unless you run it again with
+   `--remove-public`, which asks you to type the public repository's name
+   before touching it.
 
 If any check fails it stops and deletes nothing, so the commercial history is
 never in only one place.
+
+## What removing the public branch does, and does not, do
+
+Deleting the branch removes it from the public repository. It does **not**
+retract commits that were already published. Forks, clones, GitHub's cached
+commit views and any third-party mirror may still hold them.
+
+Treat anything that was ever public as public. A private repository protects
+**future** development; it cannot un-publish past work. If a real credential
+was ever committed, rotate it — do not rely on deletion.
 
 ## Afterwards
 

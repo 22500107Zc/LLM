@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Sidebar from "@/components/SettingsSidebar";
 import { isMobile } from "react-device-detect";
 import Business from "@/models/business";
@@ -14,26 +14,22 @@ import { Modal } from "../Agents";
 import showToast from "@/utils/toast";
 
 /**
- * Value.
+ * Return on subscription.
  *
- * This page exists to make the commercial claim falsifiable. Verified
- * recurring value is the only figure that moves the verdict; pending records
- * and one-time recoveries are shown separately and never counted. The words
- * "qualified", "proven" and "guaranteed" appear only where verified records
- * support them.
+ * The number here is the customer's own return, and it moves as their inputs
+ * move. There is no target to reach and nothing to qualify for: 30x and 82x
+ * are ordinary results, and so is 0.4x.
+ *
+ *   monthly benefit = recurring cost savings + attributable gross profit
+ *   return multiple = monthly benefit / subscription fee
+ *   net value       = monthly benefit - subscription fee
+ *   net ROI         = ((monthly benefit - fee) / fee) x 100
+ *
+ * A record counts as soon as it is recorded, so nobody has to wait for a
+ * second person to see the effect of their own input. When the headline
+ * includes anything unverified it says so, and the verified portion stays
+ * visible on its own.
  */
-
-const STATUS_PRESENTATION = {
-  below_90x: { tone: "neutral", label: "Below 90x on verified evidence" },
-  qualified_90x: {
-    tone: "success",
-    label: "90x qualified on verified evidence",
-  },
-  qualified_100x: {
-    tone: "success",
-    label: "100x qualified on verified evidence",
-  },
-};
 
 function money(cents, currency = "USD") {
   if (cents === null || cents === undefined) return "—";
@@ -48,9 +44,58 @@ function money(cents, currency = "USD") {
   }
 }
 
+/** Multiples read naturally: 30x, 82.5x, 0.42x. */
+function multipleLabel(value) {
+  if (value === null || value === undefined) return "—";
+  const rounded = Math.round(value * 100) / 100;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(2)}x`;
+}
+
+function percentLabel(value) {
+  if (value === null || value === undefined) return "—";
+  const rounded = Math.round(value * 100) / 100;
+  return `${rounded > 0 ? "+" : ""}${rounded.toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+  })}%`;
+}
+
+/**
+ * The same arithmetic the server uses, so a draft can be previewed without a
+ * round trip. A missing or zero fee yields nulls, never Infinity or NaN.
+ */
+export function computeReturn(benefitCents, feeCents) {
+  const benefit = Number.isFinite(Number(benefitCents))
+    ? Math.round(Number(benefitCents))
+    : 0;
+  const fee =
+    Number.isFinite(Number(feeCents)) && Number(feeCents) > 0
+      ? Math.round(Number(feeCents))
+      : 0;
+  if (fee <= 0)
+    return {
+      monthlyBenefitCents: benefit,
+      returnMultiple: null,
+      netValueCents: null,
+      netRoiPercent: null,
+    };
+  const netValueCents = benefit - fee;
+  return {
+    monthlyBenefitCents: benefit,
+    returnMultiple: Math.round((benefit / fee) * 100) / 100,
+    netValueCents,
+    netRoiPercent: Math.round((netValueCents / fee) * 100 * 100) / 100,
+  };
+}
+
 function thisMonth() {
   const now = new Date();
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function centsFrom(input) {
+  const number = Number(input);
+  if (!Number.isFinite(number)) return 0;
+  return Math.round(number * 100);
 }
 
 export default function ValuePage() {
@@ -62,9 +107,14 @@ export default function ValuePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [calculator, setCalculator] = useState(false);
 
-  async function load() {
+  /**
+   * Reloading is the single path back to a correct number, so every mutation
+   * — save, edit, remove, verify, reject — and every month change ends here.
+   */
+  const load = useCallback(async () => {
     setLoading(true);
     const [summaryResult, recordResult, me] = await Promise.all([
       Business.value.summary(period),
@@ -72,21 +122,39 @@ export default function ValuePage() {
       Business.me(),
     ]);
     if (summaryResult?.error) setError(summaryResult.error);
-    else setSummary(summaryResult.summary);
+    else {
+      setError(null);
+      setSummary(summaryResult.summary);
+    }
     setRecords(recordResult?.records ?? []);
     setCategories(recordResult?.categories ?? summaryResult?.categories ?? {});
     setCapabilities(me?.capabilities ?? []);
     setLoading(false);
-  }
+  }, [period]);
 
   useEffect(() => {
     load();
-  }, [period]);
+  }, [load]);
 
   const canManage = capabilities.includes("settings:manage");
   const canVerify = capabilities.includes("billing:view");
-  const presentation =
-    STATUS_PRESENTATION[summary?.status] ?? STATUS_PRESENTATION.below_90x;
+  const currency = (summary?.currency ?? "usd").toUpperCase();
+
+  async function setVerification(uuid, verification) {
+    const result = await Business.value.setVerification(uuid, verification);
+    if (!result?.success)
+      return showToast(result?.error ?? "Could not update.", "error");
+    showToast(`Record ${verification}.`, "success");
+    load();
+  }
+
+  async function remove(uuid) {
+    if (!window.confirm("Remove this value record?")) return;
+    const result = await Business.value.remove(uuid);
+    if (result?.error) return showToast(result.error, "error");
+    showToast("Record removed.", "success");
+    load();
+  }
 
   return (
     <div className="w-screen h-screen overflow-hidden bg-theme-bg-container flex">
@@ -97,7 +165,7 @@ export default function ValuePage() {
       >
         <BusinessPage
           title="Value"
-          description="Measured business value delivered by the platform. Only records verified against evidence count toward qualification."
+          description="What the platform returned this month against what it costs."
           loading={loading}
           error={error}
           actions={
@@ -106,10 +174,11 @@ export default function ValuePage() {
                 type="month"
                 value={period}
                 onChange={(e) => setPeriod(e.target.value)}
+                aria-label="Reporting month"
                 className="rounded-lg border border-theme-modal-border bg-theme-bg-primary px-3 py-2 text-sm text-theme-text-primary"
               />
               <Button variant="secondary" onClick={() => setCalculator(true)}>
-                Qualification calculator
+                Estimate value
               </Button>
               <Button
                 variant="secondary"
@@ -123,86 +192,16 @@ export default function ValuePage() {
             </div>
           }
         >
-          {summary && (
-            <>
-              <Card>
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-theme-text-secondary">
-                      Verified recurring value this month
-                    </p>
-                    <p className="mt-1 text-3xl font-semibold text-theme-text-primary">
-                      {money(summary.verified.recurringCents)}
-                    </p>
-                    <p className="mt-1 text-sm text-theme-text-secondary">
-                      {summary.multiple}x the {summary.fee.display} platform fee
-                    </p>
-                  </div>
-                  <Badge tone={presentation.tone}>{presentation.label}</Badge>
-                </div>
+          {summary && <Headline summary={summary} currency={currency} />}
 
-                <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  <Threshold
-                    label="90x threshold"
-                    requiredCents={summary.thresholds.x90.requiredCents}
-                    achievedCents={summary.verified.recurringCents}
-                    shortfallCents={summary.shortfall.to90xCents}
-                  />
-                  <Threshold
-                    label="100x threshold"
-                    requiredCents={summary.thresholds.x100.requiredCents}
-                    achievedCents={summary.verified.recurringCents}
-                    shortfallCents={summary.shortfall.to100xCents}
-                  />
-                  <div className="rounded-xl border border-theme-modal-border bg-theme-bg-primary p-4">
-                    <p className="text-xs uppercase tracking-wide text-theme-text-secondary">
-                      Net ROI
-                    </p>
-                    <p className="mt-1 text-2xl font-semibold text-theme-text-primary">
-                      {summary.netRoi}x
-                    </p>
-                    <p className="mt-1 text-xs text-theme-text-secondary">
-                      (verified value − fee) ÷ fee
-                    </p>
-                  </div>
-                </div>
-              </Card>
-
-              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-                <Stat
-                  label="Verified records"
-                  value={summary.verified.recordCount}
-                  hint="counted"
-                />
-                <Stat
-                  label="Awaiting verification"
-                  value={money(summary.unverified.pendingCents)}
-                  hint={`${summary.unverified.recordCount} record(s) — not counted`}
-                />
-                <Stat
-                  label="One-time recoveries"
-                  value={money(summary.verified.oneTimeCents)}
-                  hint="excluded from the monthly multiple"
-                />
-                <Stat label="Platform fee" value={summary.fee.display} />
-              </div>
-
-              {summary.unverified.recordCount > 0 && (
-                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
-                  {summary.unverified.recordCount} record(s) worth{" "}
-                  {money(summary.unverified.pendingCents)} are awaiting
-                  verification. They do not count toward the figures above until
-                  someone other than their author confirms them against
-                  evidence.
-                </div>
-              )}
-            </>
+          {summary && summary.hasInput && (
+            <Breakdown summary={summary} currency={currency} />
           )}
 
           {!records.length ? (
             <EmptyState
-              title="No value recorded for this month"
-              description="Record gross profit on deals the platform is credited with, or costs avoided against an approved baseline. A captured lead is not revenue and cannot be recorded as one."
+              title="Nothing recorded for this month yet"
+              description="Record gross profit on deals the platform is credited with, or costs avoided against an approved baseline. Your return appears as soon as you add the first one. A captured lead is not revenue and cannot be recorded as one."
               action={
                 canManage ? (
                   <Button onClick={() => setAdding(true)}>Record value</Button>
@@ -212,192 +211,400 @@ export default function ValuePage() {
           ) : (
             <Card title={`Records (${records.length})`}>
               <Table
-                columns={[
-                  {
-                    key: "category",
-                    label: "What",
-                    render: (r) => (
-                      <div>
-                        <p className="font-medium">
-                          {categories[r.category]?.label ?? r.category}
-                        </p>
-                        <p className="text-xs text-theme-text-secondary line-clamp-1">
-                          {r.description ?? "—"}
-                        </p>
-                      </div>
-                    ),
-                  },
-                  {
-                    key: "amount_cents",
-                    label: "Amount",
-                    render: (r) => (
-                      <div>
-                        <p className="font-medium">
-                          {money(
-                            r.amount_cents,
-                            (r.currency ?? "usd").toUpperCase()
-                          )}
-                        </p>
-                        {!r.recurring && (
-                          <p className="text-xs text-theme-text-secondary">
-                            one-time
-                          </p>
-                        )}
-                      </div>
-                    ),
-                  },
-                  {
-                    key: "evidence_ref",
-                    label: "Evidence",
-                    render: (r) => (
-                      <span className="text-xs">
-                        {r.evidence_ref ?? (
-                          <span className="text-amber-400">none recorded</span>
-                        )}
-                        {r.baseline_cents !== null &&
-                          r.baseline_cents !== undefined && (
-                            <span className="block text-theme-text-secondary">
-                              baseline {money(r.baseline_cents)} →{" "}
-                              {money(r.measured_cents)}
-                            </span>
-                          )}
-                      </span>
-                    ),
-                  },
-                  {
-                    key: "verification",
-                    label: "Verification",
-                    render: (r) => (
-                      <Badge
-                        tone={
-                          r.verification === "verified"
-                            ? "success"
-                            : r.verification === "rejected"
-                              ? "danger"
-                              : "warning"
-                        }
-                      >
-                        {r.verification}
-                      </Badge>
-                    ),
-                  },
-                  {
-                    key: "actions",
-                    label: "",
-                    render: (r) => (
-                      <div className="flex gap-3">
-                        {canVerify && r.verification !== "verified" && (
-                          <button
-                            type="button"
-                            onClick={() => setVerification(r.uuid, "verified")}
-                            className="text-xs underline text-theme-text-secondary hover:text-theme-text-primary"
-                          >
-                            Verify
-                          </button>
-                        )}
-                        {canVerify && r.verification === "pending" && (
-                          <button
-                            type="button"
-                            onClick={() => setVerification(r.uuid, "rejected")}
-                            className="text-xs underline text-theme-text-secondary hover:text-theme-text-primary"
-                          >
-                            Reject
-                          </button>
-                        )}
-                        {canManage && (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              if (!window.confirm("Remove this value record?"))
-                                return;
-                              const result = await Business.value.remove(
-                                r.uuid
-                              );
-                              if (result?.error)
-                                return showToast(result.error, "error");
-                              load();
-                            }}
-                            className="text-xs underline text-red-400"
-                          >
-                            Remove
-                          </button>
-                        )}
-                      </div>
-                    ),
-                  },
-                ]}
+                columns={recordColumns({
+                  categories,
+                  canManage,
+                  canVerify,
+                  onEdit: setEditing,
+                  onVerify: setVerification,
+                  onRemove: remove,
+                })}
                 rows={records}
               />
             </Card>
           )}
 
-          <p className="text-xs text-theme-text-secondary">
-            Only verified, recurring records count toward the 90x and 100x
-            figures. A captured lead is never counted as revenue; revenue counts
-            only as realized gross profit on a confirmed conversion, and an
-            avoided cost only against a customer-approved baseline with a
-            measured result.
-          </p>
-
           {adding && (
             <RecordValue
               categories={categories}
               period={period}
+              feeCents={summary?.fee?.monthlyCents ?? 0}
+              currency={currency}
+              currentBenefitCents={summary?.monthlyBenefitCents ?? 0}
               onClose={() => setAdding(false)}
-              onCreated={() => {
+              onSaved={() => {
                 setAdding(false);
                 load();
               }}
             />
           )}
 
-          {calculator && <Calculator onClose={() => setCalculator(false)} />}
+          {editing && (
+            <EditValue
+              record={editing}
+              categories={categories}
+              feeCents={summary?.fee?.monthlyCents ?? 0}
+              currency={currency}
+              currentBenefitCents={summary?.monthlyBenefitCents ?? 0}
+              onClose={() => setEditing(null)}
+              onSaved={() => {
+                setEditing(null);
+                load();
+              }}
+            />
+          )}
+
+          {calculator && (
+            <EstimateValue
+              period={period}
+              currency={currency}
+              onClose={() => setCalculator(false)}
+            />
+          )}
         </BusinessPage>
       </div>
     </div>
   );
-
-  async function setVerification(uuid, verification) {
-    const result = await Business.value.setVerification(uuid, verification);
-    if (!result?.success)
-      return showToast(result?.error ?? "Could not update.", "error");
-    showToast(`Record ${verification}.`, "success");
-    load();
-  }
 }
 
-function Threshold({ label, requiredCents, achievedCents, shortfallCents }) {
-  const met = shortfallCents === 0;
-  const percent = requiredCents
-    ? Math.min(100, Math.round((achievedCents / requiredCents) * 100))
-    : 0;
+/** The one number the page is for, and the three that explain it. */
+function Headline({ summary, currency }) {
+  const {
+    returnMultiple,
+    monthlyBenefitCents,
+    netValueCents,
+    netRoiPercent,
+    includesEstimates,
+    headlineLabel,
+    fee,
+    feeAvailable,
+  } = summary;
+
+  const belowCost = netValueCents !== null && netValueCents < 0;
+
   return (
-    <div className="rounded-xl border border-theme-modal-border bg-theme-bg-primary p-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs uppercase tracking-wide text-theme-text-secondary">
-          {label}
-        </p>
-        {met && <Badge tone="success">met</Badge>}
+    <Card>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-theme-text-secondary">
+            {headlineLabel}
+          </p>
+          <p className="mt-1 text-4xl font-semibold text-theme-text-primary">
+            {feeAvailable ? multipleLabel(returnMultiple) : "—"}
+          </p>
+          <p className="mt-1 text-sm text-theme-text-secondary">
+            {feeAvailable
+              ? `${money(monthlyBenefitCents, currency)} recorded benefit against a ${fee.display} subscription`
+              : "Set a subscription fee to see a return multiple."}
+          </p>
+        </div>
+        {includesEstimates && (
+          <Badge tone="neutral">Includes unverified estimates</Badge>
+        )}
       </div>
-      <p className="mt-1 text-lg font-semibold text-theme-text-primary">
-        {money(requiredCents)}
-      </p>
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-theme-bg-secondary">
-        <div
-          className={`h-full rounded-full ${met ? "bg-green-500" : "bg-blue-500"}`}
-          style={{ width: `${percent}%` }}
+
+      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Figure
+          label="Recorded benefit"
+          value={money(monthlyBenefitCents, currency)}
+          hint="recurring savings + gross profit this month"
+        />
+        <Figure
+          label="Subscription cost"
+          value={fee.display}
+          hint={
+            fee.isAssumption ? "assumed fee — see note below" : "this month"
+          }
+        />
+        <Figure
+          label="Net value after subscription"
+          value={netValueCents === null ? "—" : money(netValueCents, currency)}
+          hint={
+            netRoiPercent === null
+              ? "needs a subscription fee"
+              : `net ROI ${percentLabel(netRoiPercent)}`
+          }
+          tone={belowCost ? "negative" : "normal"}
         />
       </div>
-      <p className="mt-1 text-xs text-theme-text-secondary">
-        {met
-          ? "Threshold met on verified evidence"
-          : `${money(shortfallCents)} short`}
+
+      {belowCost && (
+        <p className="mt-3 text-xs text-theme-text-secondary">
+          Recorded benefit is below the subscription cost this month.
+        </p>
+      )}
+
+      {includesEstimates && (
+        <p className="mt-3 text-xs text-theme-text-secondary">
+          {summary.headlineNote} Verified only:{" "}
+          <span className="text-theme-text-primary">
+            {multipleLabel(summary.verifiedOnly.returnMultiple)}
+          </span>{" "}
+          on {money(summary.verifiedOnly.monthlyBenefitCents, currency)}.
+        </p>
+      )}
+
+      {fee.note && (
+        <p className="mt-2 text-xs text-theme-text-secondary">{fee.note}</p>
+      )}
+    </Card>
+  );
+}
+
+/** Where the number came from, and what was deliberately left out of it. */
+function Breakdown({ summary, currency }) {
+  const { breakdown, recorded, verified, pending, otherCurrencies } = summary;
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Stat
+          label="Gross profit"
+          value={money(breakdown.recorded.gross_profit, currency)}
+          hint="attributed to the platform"
+        />
+        <Stat
+          label="Cash costs avoided"
+          value={money(breakdown.recorded.cash_saving, currency)}
+          hint="spending that stopped"
+        />
+        <Stat
+          label="Time valued"
+          value={money(breakdown.recorded.time_valued, currency)}
+          hint="hours costed at an agreed rate, not cash"
+        />
+        <Stat
+          label="One-time recoveries"
+          value={money(recorded.oneTimeCents, currency)}
+          hint="counted once, not repeated monthly"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Stat
+          label="Verified"
+          value={money(verified.recurringCents, currency)}
+          hint={`${verified.recordCount} record(s) confirmed against evidence`}
+        />
+        <Stat
+          label="Awaiting verification"
+          value={money(pending.recurringCents, currency)}
+          hint={`${pending.recordCount} record(s) — counted as estimates`}
+        />
+        <Stat
+          label="Rejected"
+          value={summary.rejected.recordCount}
+          hint="excluded from every figure"
+        />
+        <Stat
+          label="Other currencies"
+          value={otherCurrencies.recordCount}
+          hint={
+            otherCurrencies.recordCount
+              ? `${otherCurrencies.currencies.join(", ").toUpperCase()} — listed, not added`
+              : "none"
+          }
+        />
+      </div>
+    </>
+  );
+}
+
+function Figure({ label, value, hint, tone = "normal" }) {
+  return (
+    <div className="rounded-xl border border-theme-modal-border bg-theme-bg-primary p-4">
+      <p className="text-xs uppercase tracking-wide text-theme-text-secondary">
+        {label}
       </p>
+      <p
+        className={`mt-1 text-2xl font-semibold ${
+          tone === "negative" ? "text-red-400" : "text-theme-text-primary"
+        }`}
+      >
+        {value}
+      </p>
+      <p className="mt-1 text-xs text-theme-text-secondary">{hint}</p>
     </div>
   );
 }
 
-function RecordValue({ categories, period, onClose, onCreated }) {
+function recordColumns({
+  categories,
+  canManage,
+  canVerify,
+  onEdit,
+  onVerify,
+  onRemove,
+}) {
+  return [
+    {
+      key: "category",
+      label: "What",
+      render: (r) => (
+        <div>
+          <p className="font-medium">
+            {categories[r.category]?.label ?? r.category}
+          </p>
+          <p className="text-xs text-theme-text-secondary line-clamp-1">
+            {r.description ?? "—"}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: "amount_cents",
+      label: "Amount",
+      render: (r) => (
+        <div>
+          <p className="font-medium">
+            {money(r.amount_cents, (r.currency ?? "usd").toUpperCase())}
+          </p>
+          {!r.recurring && (
+            <p className="text-xs text-theme-text-secondary">one-time</p>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "evidence_ref",
+      label: "Evidence",
+      render: (r) => (
+        <span className="text-xs">
+          {r.evidence_ref ?? (
+            <span className="text-theme-text-secondary">none recorded</span>
+          )}
+          {r.baseline_cents !== null && r.baseline_cents !== undefined && (
+            <span className="block text-theme-text-secondary">
+              baseline {money(r.baseline_cents)} → {money(r.measured_cents)}
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: "verification",
+      label: "Verification",
+      render: (r) => (
+        <Badge
+          tone={
+            r.verification === "verified"
+              ? "success"
+              : r.verification === "rejected"
+                ? "danger"
+                : "neutral"
+          }
+        >
+          {r.verification}
+        </Badge>
+      ),
+    },
+    {
+      key: "actions",
+      label: "",
+      render: (r) => (
+        <div className="flex flex-wrap gap-3">
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => onEdit(r)}
+              className="text-xs underline text-theme-text-secondary hover:text-theme-text-primary"
+            >
+              Edit
+            </button>
+          )}
+          {canVerify && r.verification !== "verified" && (
+            <button
+              type="button"
+              onClick={() => onVerify(r.uuid, "verified")}
+              className="text-xs underline text-theme-text-secondary hover:text-theme-text-primary"
+            >
+              Verify
+            </button>
+          )}
+          {canVerify && r.verification !== "rejected" && (
+            <button
+              type="button"
+              onClick={() => onVerify(r.uuid, "rejected")}
+              className="text-xs underline text-theme-text-secondary hover:text-theme-text-primary"
+            >
+              Reject
+            </button>
+          )}
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => onRemove(r.uuid)}
+              className="text-xs underline text-red-400"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      ),
+    },
+  ];
+}
+
+/**
+ * Live preview of what a draft would do to the month's return.
+ *
+ * Deliberately marked unsaved: it is arithmetic on what has been typed, and
+ * nothing is persisted until Save is pressed.
+ */
+function LivePreview({
+  currentBenefitCents,
+  draftCents,
+  feeCents,
+  currency,
+  recurring,
+}) {
+  const before = computeReturn(currentBenefitCents, feeCents);
+  const after = computeReturn(
+    currentBenefitCents + (recurring ? draftCents : 0),
+    feeCents
+  );
+
+  return (
+    <div className="mt-4 rounded-lg border border-dashed border-theme-modal-border bg-theme-bg-primary px-4 py-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs uppercase tracking-wide text-theme-text-secondary">
+          Preview — not saved
+        </p>
+        <Badge tone="neutral">unsaved</Badge>
+      </div>
+      <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-sm text-theme-text-secondary">
+          {multipleLabel(before.returnMultiple)}
+        </span>
+        <span className="text-theme-text-secondary">→</span>
+        <span className="text-2xl font-semibold text-theme-text-primary">
+          {multipleLabel(after.returnMultiple)}
+        </span>
+        <span className="text-xs text-theme-text-secondary">
+          {money(after.monthlyBenefitCents, currency)} benefit ·{" "}
+          {after.netValueCents === null
+            ? "no fee set"
+            : `${money(after.netValueCents, currency)} net`}
+        </span>
+      </div>
+      {!recurring && draftCents > 0 && (
+        <p className="mt-1 text-xs text-theme-text-secondary">
+          A one-time amount is recorded and shown separately; it does not change
+          the monthly multiple.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function RecordValue({
+  categories,
+  period,
+  feeCents,
+  currency,
+  currentBenefitCents,
+  onClose,
+  onSaved,
+}) {
   const [form, setForm] = useState({
     category: Object.keys(categories)[0] ?? "closed_won_revenue",
     period,
@@ -415,17 +622,16 @@ function RecordValue({ categories, period, onClose, onCreated }) {
 
   const spec = categories[form.category] ?? {};
   const isAvoidedCost = spec.kind === "avoided_cost";
+  const draftCents = useMemo(() => centsFrom(form.amount), [form.amount]);
 
   async function submit() {
-    const amountCents = Math.round(Number(form.amount) * 100);
-    if (!Number.isFinite(amountCents) || amountCents <= 0)
-      return showToast("Enter a positive amount.", "error");
+    if (draftCents <= 0) return showToast("Enter a positive amount.", "error");
 
     setSaving(true);
     const result = await Business.value.create({
       category: form.category,
       period: form.period,
-      amountCents,
+      amountCents: draftCents,
       recurring: form.recurring,
       description: form.description,
       evidenceRef: form.evidenceRef,
@@ -433,16 +639,16 @@ function RecordValue({ categories, period, onClose, onCreated }) {
       sourceReference: form.sourceReference,
       ...(isAvoidedCost
         ? {
-            baselineCents: Math.round(Number(form.baseline) * 100),
-            measuredCents: Math.round(Number(form.measured) * 100),
+            baselineCents: centsFrom(form.baseline),
+            measuredCents: centsFrom(form.measured),
             baselineApprovedBy: form.baselineApprovedBy,
           }
         : {}),
     });
     setSaving(false);
     if (result?.error) return showToast(result.error, "error");
-    showToast("Recorded. It counts once someone else verifies it.", "success");
-    onCreated();
+    showToast("Recorded.", "success");
+    onSaved();
   }
 
   return (
@@ -491,6 +697,14 @@ function RecordValue({ categories, period, onClose, onCreated }) {
           Recurring monthly
         </label>
       </div>
+
+      <LivePreview
+        currentBenefitCents={currentBenefitCents}
+        draftCents={draftCents}
+        feeCents={feeCents}
+        currency={currency}
+        recurring={form.recurring}
+      />
 
       {isAvoidedCost && (
         <div className="mt-4 rounded-lg border border-theme-modal-border p-3">
@@ -557,72 +771,266 @@ function RecordValue({ categories, period, onClose, onCreated }) {
           Cancel
         </Button>
         <Button onClick={submit} disabled={saving}>
-          {saving ? "Saving…" : "Record"}
+          {saving ? "Saving…" : "Save record"}
         </Button>
       </div>
     </Modal>
   );
 }
 
-function Calculator({ onClose }) {
-  const [profitPerSale, setProfitPerSale] = useState("10000");
-  const [result, setResult] = useState(null);
+/**
+ * Editing the figures a customer most often gets wrong. Category is fixed at
+ * creation, because changing it would change which rules were ever applied.
+ */
+function EditValue({
+  record,
+  categories,
+  feeCents,
+  currency,
+  currentBenefitCents,
+  onClose,
+  onSaved,
+}) {
+  const [form, setForm] = useState({
+    amount: ((record.amount_cents ?? 0) / 100).toString(),
+    period: record.period ?? thisMonth(),
+    recurring: record.recurring !== false,
+    description: record.description ?? "",
+    evidenceRef: record.evidence_ref ?? "",
+    baseline:
+      record.baseline_cents === null || record.baseline_cents === undefined
+        ? ""
+        : (record.baseline_cents / 100).toString(),
+    measured:
+      record.measured_cents === null || record.measured_cents === undefined
+        ? ""
+        : (record.measured_cents / 100).toString(),
+    baselineApprovedBy: record.baseline_approved_by ?? "",
+  });
+  const [saving, setSaving] = useState(false);
 
-  async function compute() {
-    const cents = Math.round(Number(profitPerSale) * 100);
-    const data = await Business.value.scenarios({
-      grossProfitPerSaleCents: cents,
+  const spec = categories[record.category] ?? {};
+  const isAvoidedCost = spec.kind === "avoided_cost";
+  const draftCents = useMemo(() => centsFrom(form.amount), [form.amount]);
+
+  // The record's own current contribution is removed from the baseline so the
+  // preview shows the month as it would be after the edit, not on top of it.
+  const othersBenefitCents =
+    currentBenefitCents -
+    (record.recurring !== false ? (record.amount_cents ?? 0) : 0);
+
+  async function submit() {
+    if (draftCents <= 0) return showToast("Enter a positive amount.", "error");
+    setSaving(true);
+    const result = await Business.value.update(record.uuid, {
+      amountCents: draftCents,
+      period: form.period,
+      recurring: form.recurring,
+      description: form.description,
+      evidenceRef: form.evidenceRef,
+      ...(isAvoidedCost
+        ? {
+            baselineCents: centsFrom(form.baseline),
+            measuredCents: centsFrom(form.measured),
+            baselineApprovedBy: form.baselineApprovedBy,
+          }
+        : {}),
     });
-    setResult(data?.error ? null : data);
+    setSaving(false);
+    if (!result?.success)
+      return showToast(result?.error ?? "Could not save the edit.", "error");
+    showToast(
+      result.reverifyRequired
+        ? "Saved. The figures changed, so it needs verifying again."
+        : "Saved.",
+      "success"
+    );
+    onSaved();
   }
 
-  useEffect(() => {
-    compute();
-  }, []);
-
   return (
-    <Modal title="Qualification calculator" onClose={onClose}>
-      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-        These are assumptions for discussion, not measured results. Only
-        verified records on the Value page count toward qualification.
+    <Modal title="Edit value record" onClose={onClose} wide>
+      <p className="text-sm text-theme-text-secondary">
+        {spec.label ?? record.category}
+        {record.verification === "verified" && (
+          <span className="block text-xs">
+            This record is verified. Changing its figures returns it to
+            unverified, because the confirmation no longer describes what is on
+            it.
+          </span>
+        )}
+      </p>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Field
+          label="Amount"
+          value={form.amount}
+          onChange={(v) => setForm({ ...form, amount: v })}
+          type="number"
+        />
+        <Field
+          label="Month"
+          value={form.period}
+          onChange={(v) => setForm({ ...form, period: v })}
+          type="month"
+        />
+        <label className="flex items-end gap-2 pb-2 text-sm text-theme-text-primary">
+          <input
+            type="checkbox"
+            checked={form.recurring}
+            onChange={(e) => setForm({ ...form, recurring: e.target.checked })}
+            className="h-4 w-4"
+          />
+          Recurring monthly
+        </label>
+      </div>
+
+      <LivePreview
+        currentBenefitCents={othersBenefitCents}
+        draftCents={draftCents}
+        feeCents={feeCents}
+        currency={currency}
+        recurring={form.recurring}
+      />
+
+      {isAvoidedCost && (
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Field
+            label="Approved baseline"
+            value={form.baseline}
+            onChange={(v) => setForm({ ...form, baseline: v })}
+            type="number"
+          />
+          <Field
+            label="Measured after"
+            value={form.measured}
+            onChange={(v) => setForm({ ...form, measured: v })}
+            type="number"
+          />
+          <Field
+            label="Baseline approved by"
+            value={form.baselineApprovedBy}
+            onChange={(v) => setForm({ ...form, baselineApprovedBy: v })}
+          />
+        </div>
+      )}
+
+      <div className="mt-4">
+        <Field
+          label="Evidence reference"
+          value={form.evidenceRef}
+          onChange={(v) => setForm({ ...form, evidenceRef: v })}
+        />
       </div>
 
       <label className="mt-4 block text-sm">
-        <span className="text-theme-text-secondary">
-          Confirmed gross profit per additional sale
-        </span>
-        <div className="mt-1 flex gap-2">
-          <input
-            type="number"
-            value={profitPerSale}
-            onChange={(e) => setProfitPerSale(e.target.value)}
-            className="flex-1 rounded-lg border border-theme-modal-border bg-theme-bg-primary px-3 py-2 text-theme-text-primary"
-          />
-          <Button variant="secondary" onClick={compute}>
-            Calculate
-          </Button>
-        </div>
+        <span className="text-theme-text-secondary">Description</span>
+        <textarea
+          rows={3}
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+          className="mt-1 w-full rounded-lg border border-theme-modal-border bg-theme-bg-primary px-3 py-2 text-theme-text-primary"
+        />
       </label>
 
-      {result && (
-        <div className="mt-4 space-y-3">
-          <Row label="Monthly platform fee" value={money(result.feeCents)} />
-          <Row label="90x requires" value={money(result.requiredCents.x90)} />
-          <Row label="100x requires" value={money(result.requiredCents.x100)} />
-          {result.scenarios?.additionalSales && (
-            <>
-              <Row
-                label="Additional sales per month for 90x"
-                value={`${result.scenarios.additionalSales.for90x}`}
-              />
-              <Row
-                label="Additional sales per month for 100x"
-                value={`${result.scenarios.additionalSales.for100x}`}
-              />
-            </>
-          )}
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button onClick={submit} disabled={saving}>
+          {saving ? "Saving…" : "Save changes"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * "Estimate value": enter savings and gross profit, see the multiple.
+ *
+ * It answers the customer's question and sets them no target.
+ */
+function EstimateValue({ period, currency, onClose }) {
+  const [savings, setSavings] = useState("");
+  const [profit, setProfit] = useState("");
+  const [fee, setFee] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Business.value.estimate({ period }).then((data) => {
+      if (!cancelled && data && !data.error) setFee(data.fee ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [period]);
+
+  const feeCents = fee?.monthlyCents ?? 0;
+  const benefitCents = centsFrom(savings) + centsFrom(profit);
+  const result = computeReturn(benefitCents, feeCents);
+  // Nothing entered yet is not a -100% return; it is no answer.
+  const hasInput = savings.trim() !== "" || profit.trim() !== "";
+
+  return (
+    <Modal title="Estimate value" onClose={onClose}>
+      <p className="text-sm text-theme-text-secondary">
+        Enter what you expect in a month. Nothing here is saved or recorded.
+      </p>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field
+          label="Recurring cost savings per month"
+          value={savings}
+          onChange={setSavings}
+          placeholder="0.00"
+          type="number"
+        />
+        <Field
+          label="Incremental gross profit per month"
+          value={profit}
+          onChange={setProfit}
+          placeholder="0.00"
+          type="number"
+        />
+      </div>
+
+      <div className="mt-5 rounded-xl border border-theme-modal-border bg-theme-bg-primary p-4">
+        <p className="text-xs uppercase tracking-wide text-theme-text-secondary">
+          Return on subscription
+        </p>
+        <p className="mt-1 text-3xl font-semibold text-theme-text-primary">
+          {hasInput && feeCents > 0
+            ? multipleLabel(result.returnMultiple)
+            : "—"}
+        </p>
+        {!hasInput && (
+          <p className="mt-1 text-sm text-theme-text-secondary">
+            Enter a figure above to see what it would come to.
+          </p>
+        )}
+        <div className={`mt-3 space-y-2 ${hasInput ? "" : "opacity-50"}`}>
+          <Row label="Monthly benefit" value={money(benefitCents, currency)} />
+          <Row label="Subscription" value={fee?.display ?? "not configured"} />
+          <Row
+            label="Net value after subscription"
+            value={
+              result.netValueCents === null
+                ? "—"
+                : money(result.netValueCents, currency)
+            }
+          />
+          <Row label="Net ROI" value={percentLabel(result.netRoiPercent)} />
         </div>
-      )}
+        {feeCents <= 0 && (
+          <p className="mt-3 text-xs text-theme-text-secondary">
+            No subscription fee is configured, so a multiple cannot be
+            calculated.
+          </p>
+        )}
+        {fee?.note && (
+          <p className="mt-3 text-xs text-theme-text-secondary">{fee.note}</p>
+        )}
+      </div>
     </Modal>
   );
 }

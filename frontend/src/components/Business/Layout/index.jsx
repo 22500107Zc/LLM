@@ -21,7 +21,11 @@ export default function BusinessPage({
         page heading needs to clear it. Extra top padding below `md` only.
       */}
       <div className="flex flex-col w-full max-w-[1400px] mx-auto px-4 md:px-6 pt-20 md:pt-8 pb-8 gap-y-6">
-        <header className="flex flex-wrap items-start justify-between gap-4">
+        {/*
+          The application shell floats the account avatar in the top-right
+          corner, so a page's action buttons need room to clear it.
+        */}
+        <header className="flex flex-wrap items-start justify-between gap-4 pr-14">
           <div className="flex flex-col gap-y-1">
             <h1 className="text-2xl font-semibold text-theme-text-primary">
               {title}

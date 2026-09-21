@@ -289,6 +289,14 @@ if [ "${VISUAL:-0}" = "1" ]; then
     OUT_DIR="$RESULTS_DIR/screenshots" \
       node "$ROOT/scripts/visual-check.cjs" 2>&1 | tee "$RESULTS_DIR/visual.log"
     [ "${PIPESTATUS[0]}" -ne 0 ] && OVERALL_FAIL=1
+
+    # The sweep above only ever sees an empty Value page. This one seeds real
+    # figures first, so the page with numbers in it is checked too.
+    log "Checking the Value page with real figures…"
+    BASE_URL="$BASE_URL" SEED_USERNAME="$SEED_USER" SEED_PASSWORD="$SEED_PASSWORD" \
+    OUT_DIR="$RESULTS_DIR/screenshots" \
+      node "$ROOT/scripts/value-visual-check.cjs" 2>&1 | tee "$RESULTS_DIR/value-visual.log"
+    [ "${PIPESTATUS[0]}" -ne 0 ] && OVERALL_FAIL=1
   fi
 fi
 
@@ -379,6 +387,13 @@ fi
   echo
   echo "## Backup and restore"
   grep -E "^(PASS|FAIL)" "$RESULTS_DIR/backup.log" 2>/dev/null | tail -2 || echo "not run"
+  echo
+  echo "## Value page (with figures)"
+  if [ -f "$RESULTS_DIR/value-visual.log" ]; then
+    grep -E "^(VALUE VISUAL CHECK|BLOCKED)" "$RESULTS_DIR/value-visual.log" | tail -2
+  else
+    echo "not run (set VISUAL=1)"
+  fi
   echo
   echo "## Visual check"
   if [ -f "$RESULTS_DIR/visual.log" ]; then

@@ -26,6 +26,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_DIR="${PLATFORM_STATE_DIR:-$ROOT/deployments}"
 COMPOSE_FILE="$ROOT/docker/docker-compose.production.yml"
 DRY_RUN=0
+BACKUP_ONLINE="${BACKUP_ONLINE:-0}"
+SKIP_BACKUP="${SKIP_BACKUP:-0}"
 
 # ---------------------------------------------------------------- output ----
 c_info()  { printf '\033[36m[operator]\033[0m %s\n' "$*"; }
@@ -128,6 +130,24 @@ assert_no_collisions() {
     fi
   fi
 }
+
+# True when this deployment already holds customer data worth protecting. A
+# brand-new deployment has none, and must not be blocked from ever starting.
+has_customer_data() {
+  local slug="$1"
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    local volume; volume="$(storage_volume_for "$slug")"
+    docker volume inspect "$volume" >/dev/null 2>&1 || return 1
+    # The volume can exist and still be empty before the first boot.
+    docker run --rm -v "$volume":/data:ro alpine:3 \
+      sh -c '[ -s /data/anythingllm.db ]' >/dev/null 2>&1 && return 0
+    return 1
+  fi
+  local host_storage; host_storage="$(env_value "$slug" HOST_STORAGE_DIR)"
+  [ -n "$host_storage" ] && [ -s "$host_storage/anythingllm.db" ]
+}
+
+storage_volume_for() { echo "$(project_for "$1")_platform-storage"; }
 
 # --------------------------------------------------------------- secrets ----
 # Generated locally, written 0600, never printed.
@@ -418,8 +438,20 @@ cmd_update() {
   require_docker
   cmd_check "$slug"
 
-  c_info "Backing up before updating…"
-  cmd_backup "$slug" || c_warn "Backup did not complete; continuing is your call."
+  # An update that proceeds without a backup is how a bad release becomes a
+  # data loss. It stops here unless there is genuinely nothing to lose yet.
+  if has_customer_data "$slug"; then
+    c_info "Backing up before updating…"
+    if ! cmd_backup "$slug"; then
+      c_err "Backup FAILED, so the update stopped before touching anything."
+      c_err "'$slug' is still running its current version and its data is untouched."
+      c_err "Fix the backup and retry, or run with --skip-backup if you accept the risk."
+      [ "${SKIP_BACKUP:-0}" = "1" ] || exit 1
+      c_warn "--skip-backup was given: updating WITHOUT a backup."
+    fi
+  else
+    c_info "No customer data yet - this is a first start, so no backup is needed."
+  fi
 
   c_info "Building and starting '$slug'…"
   compose "$slug" up -d --build || die "Start failed."
@@ -429,14 +461,48 @@ cmd_update() {
   c_ok "'$slug' is up and healthy."
 }
 
+# Waits for the deployment to be READY, not merely listening.
+#
+# /api/ping answers as soon as Express is up, which is before migrations have
+# run and before the database is usable. The platform health probe reports on
+# the database, storage and configuration, so that is what decides readiness
+# when a health token is configured.
 wait_healthy() {
   local slug="$1"
   [ "$DRY_RUN" = "1" ] && return 0
-  local port; port="$(env_value "$slug" SERVER_PORT_HOST)"
+  local port token
+  port="$(env_value "$slug" SERVER_PORT_HOST)"
+  token="$(env_value "$slug" HEALTHCHECK_TOKEN)"
+
+  local listening=0
   for _ in $(seq 1 120); do
-    curl -fsS "http://127.0.0.1:$port/api/ping" >/dev/null 2>&1 && return 0
+    if curl -fsS "http://127.0.0.1:$port/api/ping" >/dev/null 2>&1; then
+      listening=1
+      break
+    fi
     sleep 1
   done
+  [ "$listening" = "1" ] || return 1
+
+  if [ -z "$token" ]; then
+    c_warn "No HEALTHCHECK_TOKEN set, so readiness could only be checked as far as the port answering."
+    return 0
+  fi
+
+  for _ in $(seq 1 60); do
+    local probe
+    probe="$(curl -fsS -H "X-Health-Token: $token" \
+      "http://127.0.0.1:$port/api/platform/health/probe" 2>/dev/null)"
+    if printf '%s' "$probe" | grep -qi '"status":[[:space:]]*"\(ok\|healthy\|pass\)"'; then
+      return 0
+    fi
+    # A probe that answers at all with no failing check is good enough.
+    if [ -n "$probe" ] && ! printf '%s' "$probe" | grep -qi '"\(fail\|error\|unhealthy\)"'; then
+      return 0
+    fi
+    sleep 1
+  done
+  c_err "The deployment is listening but its health probe did not report ready."
   return 1
 }
 
@@ -499,32 +565,99 @@ cmd_list() {
   done
 }
 
+# Backs up one customer's deployment: database, documents, vector data, the
+# encryption material inside the volume, and the deployment's own .env.
+#
+# By default it briefly stops THIS customer's container so the snapshot is
+# consistent - a tar of a live SQLite file can capture a half-written page and
+# restore to a corrupt database. Only this customer is affected, and it is
+# started again immediately. --online skips the pause and labels the archive
+# as an online copy.
 cmd_backup() {
   local slug="$1"
   require_deployment "$slug"
-  local dir; dir="$(deployment_dir "$slug")"
+  local dir env_file
+  dir="$(deployment_dir "$slug")"
+  env_file="$(env_file_for "$slug")"
 
-  # Back up from the running container's volume when Docker is available,
-  # otherwise from a local storage path if one is configured.
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    local project; project="$(project_for "$slug")"
-    local volume="${project}_platform-storage"
-    if docker volume inspect "$volume" >/dev/null 2>&1; then
-      local stamp; stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-      local archive="$dir/backups/backup-$stamp.tar.gz"
-      c_info "Backing up volume $volume -> $archive"
-      run mkdir -p "$dir/backups"
-      run docker run --rm \
-        -v "$volume":/data:ro \
-        -v "$dir/backups":/backup \
-        alpine:3 sh -c "tar -czf /backup/backup-$stamp.tar.gz -C /data ." \
-        || { c_err "Volume backup failed."; return 1; }
-      # It contains customer documents and the database.
-      [ "$DRY_RUN" = "1" ] || chmod 600 "$archive" 2>/dev/null
-      c_ok "Backup written: $archive"
+    local volume; volume="$(storage_volume_for "$slug")"
+    if ! docker volume inspect "$volume" >/dev/null 2>&1; then
+      c_warn "No storage volume for '$slug' yet; nothing to back up."
       return 0
     fi
-    c_warn "No storage volume for '$slug' yet; nothing to back up."
+
+    local stamp archive staging quiesced
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    archive="$dir/backups/backup-$stamp.tar.gz"
+    quiesced=0
+
+    run mkdir -p "$dir/backups"
+
+    if [ "$DRY_RUN" = "1" ]; then
+      printf '\033[2m  would quiesce %s, snapshot %s and write %s\033[0m\n' \
+        "$slug" "$volume" "$archive"
+      return 0
+    fi
+
+    staging="$(mktemp -d -t backup-staging-XXXXXX)"
+    # Never leave a customer stopped because the backup failed halfway.
+    restart_if_quiesced() {
+      [ "$quiesced" = "1" ] || return 0
+      c_info "Starting '$slug' again…"
+      compose "$slug" start >/dev/null 2>&1 || \
+        c_err "'$slug' did not restart. Run: ./scripts/operator.sh resume $slug"
+      quiesced=0
+    }
+    trap 'restart_if_quiesced; rm -rf "$staging"' RETURN
+
+    if [ "${BACKUP_ONLINE:-0}" != "1" ]; then
+      c_info "Pausing '$slug' for a consistent snapshot…"
+      if compose "$slug" stop >/dev/null 2>&1; then
+        quiesced=1
+      else
+        c_warn "Could not pause '$slug'; taking an online copy instead."
+      fi
+    fi
+
+    c_info "Snapshotting $volume"
+    if ! docker run --rm \
+        -v "$volume":/data:ro \
+        -v "$staging":/staging \
+        alpine:3 sh -c 'mkdir -p /staging/payload && cp -a /data/. /staging/payload/'; then
+      c_err "Volume snapshot failed."
+      return 1
+    fi
+
+    restart_if_quiesced
+
+    # The documentation promises the configuration is in the archive, so it
+    # has to actually be there: without it, a restored deployment cannot read
+    # back its own stored integration secrets.
+    mkdir -p "$staging/payload/config"
+    if [ -f "$env_file" ]; then
+      cp "$env_file" "$staging/payload/config/$slug.env"
+    else
+      c_warn "No env file at $env_file; the archive will not contain it."
+    fi
+
+    cat > "$staging/payload/MANIFEST.json" <<MANIFEST
+{
+  "customer": "$slug",
+  "createdAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "volume": "$volume",
+  "consistency": "$([ "${BACKUP_ONLINE:-0}" = "1" ] && echo online-copy || echo quiesced-snapshot)",
+  "includes": ["database", "documents", "vector data", "encryption keys", "configuration"]
+}
+MANIFEST
+
+    if ! tar -czf "$archive" -C "$staging/payload" .; then
+      c_err "Could not write the archive."
+      return 1
+    fi
+    # It contains customer documents, the database and the deployment secrets.
+    chmod 600 "$archive" 2>/dev/null
+    c_ok "Backup written: $archive"
     return 0
   fi
 
@@ -534,17 +667,23 @@ cmd_backup() {
   if [ -n "$host_storage" ] && [ -d "$host_storage" ]; then
     c_info "Docker unavailable; backing up host storage $host_storage"
     run env STORAGE_DIR="$host_storage" \
-      BACKUP_ENV_FILES="$(env_file_for "$slug")" \
+      BACKUP_ENV_FILES="$env_file" \
       "$ROOT/scripts/backup.sh" "$dir/backups"
     return $?
   fi
-  c_err "Cannot back up '$slug': Docker is unavailable and no HOST_STORAGE_DIR is set in $(env_file_for "$slug")."
+  c_err "Cannot back up '$slug': Docker is unavailable and no HOST_STORAGE_DIR is set in $env_file."
   c_err "Start Docker, or add HOST_STORAGE_DIR=<path to this customer's storage> and retry."
   return 1
 }
 
-# Restores the newest backup into a THROWAWAY location and checks it is
-# readable. It never touches the live deployment.
+# Proves the newest backup actually restores.
+#
+# Checking that a database file exists and is bigger than a kilobyte proves
+# nothing - a truncated or half-written file passes that. This extracts into
+# isolated storage, runs SQLite's own integrity check, and then opens the
+# restored database and reads real rows out of it. The live customer's storage
+# is never touched: the target is a fresh temporary directory, and the check
+# refuses to run if that is ever not the case.
 cmd_restore_test() {
   local slug="$1"
   require_deployment "$slug"
@@ -558,31 +697,151 @@ cmd_restore_test() {
   c_info "  target : $target (throwaway; the live deployment is untouched)"
 
   if [ "$DRY_RUN" = "1" ]; then
-    printf '\033[2m  would extract and verify the archive\033[0m\n'
+    printf '\033[2m  would extract, integrity-check and read the restored database\033[0m\n'
     rm -rf "$target"
     return 0
   fi
 
-  tar -xzf "$archive" -C "$target" || { rm -rf "$target"; die "Archive could not be extracted."; }
+  # Guard rail: never let this point at anything a customer is using.
+  case "$target" in
+    /tmp/*|/var/tmp/*) : ;;
+    *) rm -rf "$target"; die "Refusing to restore-test outside a temporary directory." ;;
+  esac
+  local host_storage; host_storage="$(env_value "$slug" HOST_STORAGE_DIR)"
+  if [ -n "$host_storage" ] && [ "$target" = "$host_storage" ]; then
+    rm -rf "$target"
+    die "Refusing to restore-test into the live storage directory."
+  fi
+
+  trap 'rm -rf "$target"' RETURN
+
+  tar -xzf "$archive" -C "$target" || die "Archive could not be extracted."
 
   local problems=0
-  if [ -f "$target/anythingllm.db" ]; then
-    local size; size="$(stat -c %s "$target/anythingllm.db")"
-    if [ "$size" -gt 1024 ]; then
-      c_ok "  database present (${size} bytes)"
-    else
-      c_err "  database file looks empty"; problems=$((problems+1))
-    fi
+  local db="$target/anythingllm.db"
+
+  if [ ! -f "$db" ]; then
+    c_err "  no database in the archive"
+    problems=$((problems + 1))
   else
-    c_err "  no database in the archive"; problems=$((problems+1))
+    # SQLite's own verdict on the file, then a real read through the
+    # application's client. Either failing means this backup is not restorable.
+    local report
+    report="$(cd "$ROOT/server" && DATABASE_URL="file:$db" node -e '
+      const { PrismaClient } = require("@prisma/client");
+      const prisma = new PrismaClient();
+      (async () => {
+        const integrity = await prisma.$queryRawUnsafe("PRAGMA integrity_check;");
+        const verdict = Object.values(integrity?.[0] ?? {})[0];
+        if (String(verdict).toLowerCase() !== "ok")
+          throw new Error(`integrity_check said: ${verdict}`);
+
+        const tables = await prisma.$queryRawUnsafe(
+          "SELECT name FROM sqlite_master WHERE type=\x27table\x27;"
+        );
+        const names = tables.map((t) => t.name);
+        for (const required of ["users", "workspaces", "system_settings"])
+          if (!names.includes(required))
+            throw new Error(`restored database has no ${required} table`);
+
+        // Read real rows back, not just metadata.
+        const users = await prisma.users.count();
+        const settings = await prisma.system_settings.count();
+        console.log(`OK integrity=ok tables=${names.length} users=${users} settings=${settings}`);
+      })()
+        .catch((error) => { console.log(`FAIL ${error.message}`); process.exitCode = 1; })
+        .finally(() => prisma.$disconnect());
+    ' 2>/dev/null)"
+
+    if printf '%s' "$report" | grep -q '^OK '; then
+      c_ok "  database restores and reads: ${report#OK }"
+    else
+      c_err "  restored database did not open cleanly: ${report:-no output}"
+      problems=$((problems + 1))
+    fi
   fi
 
   for expected in documents lancedb; do
     [ -d "$target/$expected" ] && c_ok "  $expected present" || c_warn "  $expected not in the archive"
   done
 
-  rm -rf "$target"
+  # The documentation promises the configuration travels with the archive.
+  if [ -f "$target/config/$slug.env" ]; then
+    c_ok "  deployment configuration present"
+  else
+    c_err "  the archive has no deployment configuration, so a restore could not read back stored secrets"
+    problems=$((problems + 1))
+  fi
+
+  if [ -e "$target/comkey" ]; then
+    c_ok "  encryption material present"
+  else
+    c_warn "  no encryption material in the archive (none may exist yet)"
+  fi
+
   [ "$problems" -eq 0 ] && c_ok "Restore test passed." || die "Restore test found $problems problem(s)."
+}
+
+# Restores a backup INTO the customer's own Docker volume.
+#
+# This is the destructive counterpart to restore-test, so it asks for the slug
+# to be typed, takes a safety backup of what is there now, and stops the
+# deployment first so nothing is writing while the data is replaced.
+cmd_restore() {
+  local slug="$1" archive="${2:-}"
+  require_deployment "$slug"
+  require_docker
+  local dir; dir="$(deployment_dir "$slug")"
+
+  [ -n "$archive" ] || archive="$(ls -t "$dir/backups"/*.tar.gz 2>/dev/null | head -1)"
+  [ -n "$archive" ] && [ -f "$archive" ] || die "No archive to restore. Pass one: ./scripts/operator.sh restore $slug <archive.tar.gz>"
+
+  local volume; volume="$(storage_volume_for "$slug")"
+
+  c_warn "This REPLACES the data in $volume for '$slug' with $archive."
+  c_warn "A safety backup of the current data is taken first."
+  printf 'Type the customer slug to confirm: '
+  read -r confirmation
+  [ "$confirmation" = "$slug" ] || die "Confirmation did not match. Nothing was changed."
+
+  if has_customer_data "$slug"; then
+    cmd_backup "$slug" || die "The safety backup failed, so the restore stopped. Nothing was changed."
+  fi
+
+  c_info "Stopping '$slug'…"
+  compose "$slug" stop || die "Could not stop '$slug'."
+
+  local staging; staging="$(mktemp -d -t restore-XXXXXX)"
+  trap 'rm -rf "$staging"' RETURN
+  tar -xzf "$archive" -C "$staging" || die "Archive could not be extracted."
+
+  c_info "Writing the restored data into $volume…"
+  # The previous contents are moved aside inside the volume rather than
+  # deleted, so a bad restore is still recoverable from the volume itself.
+  run docker run --rm \
+    -v "$volume":/data \
+    -v "$staging":/restore:ro \
+    alpine:3 sh -c '
+      set -e
+      stamp=$(date -u +%Y%m%dT%H%M%SZ)
+      mkdir -p "/data/.pre-restore-$stamp"
+      for entry in /data/*; do
+        [ -e "$entry" ] || continue
+        case "$entry" in *"/.pre-restore-"*) continue ;; esac
+        mv "$entry" "/data/.pre-restore-$stamp/"
+      done
+      cp -a /restore/. /data/
+      rm -rf /data/config
+    ' || die "Restore failed. '$slug' is stopped; its previous data is still in the volume."
+
+  c_info "Starting '$slug'…"
+  compose "$slug" up -d || die "Could not start '$slug' after the restore."
+  wait_healthy "$slug" && c_ok "'$slug' is restored and healthy." || \
+    c_warn "'$slug' restarted but is not answering yet. Check: ./scripts/operator.sh logs $slug"
+
+  c_info "The previous data is kept inside the volume under .pre-restore-<timestamp>."
+  c_warn "The archive's config/$slug.env was NOT applied automatically. Compare it with"
+  c_warn "$(env_file_for "$slug") yourself before changing anything."
 }
 
 cmd_suspend() {
@@ -628,7 +887,7 @@ cmd_remove_containers() {
 }
 
 usage() {
-  cat <<USAGE
+  cat <<'USAGE'
 Operator CLI for dedicated customer deployments.
 
   provision <slug> --domain <domain> --port <port> [--name "Customer Name"]
@@ -638,9 +897,14 @@ Operator CLI for dedicated customer deployments.
   update <slug>         Back up, then build and start; waits for health.
   status [slug]         Show one deployment, or list all when omitted.
   list                  List every deployment on this host.
-  backup <slug>         Back up this customer's storage volume.
-  restore-test <slug>   Restore the newest backup into a throwaway directory
-                        and verify it. The live deployment is untouched.
+  backup <slug>         Back up this customer's data AND configuration. Pauses
+                        only this customer for a consistent snapshot.
+  restore-test <slug>   Restore the newest backup into a throwaway directory,
+                        integrity-check it and read it back. The live
+                        deployment is untouched.
+  restore <slug> [archive]
+                        Restore a backup INTO that customer's volume. Takes a
+                        safety backup first and requires typed confirmation.
   suspend <slug>        Stop the containers. Data is retained.
   resume <slug>         Start them again.
   logs <slug>           Follow the logs.
@@ -650,6 +914,10 @@ Operator CLI for dedicated customer deployments.
 
 Global:
   --dry-run             Print what would happen and change nothing.
+  --online              Back up without pausing the customer. Faster, but the
+                        snapshot may not be consistent.
+  --skip-backup         Allow "update" to proceed when its backup fails.
+                        You are accepting the risk of losing data.
 
 There is no automatic customer-data deletion command, by design.
 USAGE
@@ -660,6 +928,8 @@ ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
+    --online) BACKUP_ONLINE=1 ;;
+    --skip-backup) SKIP_BACKUP=1 ;;
     *) ARGS+=("$arg") ;;
   esac
 done
@@ -676,6 +946,7 @@ case "$COMMAND" in
   list)               cmd_list ;;
   backup)             [ -n "${1:-}" ] || die "Usage: operator.sh backup <slug>"; cmd_backup "$1" ;;
   restore-test)       [ -n "${1:-}" ] || die "Usage: operator.sh restore-test <slug>"; cmd_restore_test "$1" ;;
+  restore)            [ -n "${1:-}" ] || die "Usage: operator.sh restore <slug> [archive.tar.gz]"; cmd_restore "$1" "${2:-}" ;;
   suspend)            [ -n "${1:-}" ] || die "Usage: operator.sh suspend <slug>"; cmd_suspend "$1" ;;
   resume)             [ -n "${1:-}" ] || die "Usage: operator.sh resume <slug>"; cmd_resume "$1" ;;
   logs)               [ -n "${1:-}" ] || die "Usage: operator.sh logs <slug>"; cmd_logs "$1" ;;

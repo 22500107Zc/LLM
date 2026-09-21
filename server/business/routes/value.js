@@ -3,11 +3,13 @@ const { ValueRecords, CATEGORIES, VERIFICATION } = require("../models/value");
 const { requireCapability, safeHandler } = require("../middleware");
 
 /**
- * Value evidence API.
+ * Return-on-subscription API.
  *
- * Reading is available to anyone who can see analytics; creating, verifying
- * and deleting are restricted, and verification is separated from creation so
- * one person cannot both claim and confirm a number.
+ * Reading is available to anyone who can see analytics; creating, editing,
+ * verifying and deleting are restricted, and verification stays separated from
+ * creation so one person cannot both claim and confirm a number. Verification
+ * marks which portion of the total is evidenced; it no longer decides whether
+ * a customer can see their own figure.
  */
 function valueRoutes(router) {
   router.get(
@@ -15,8 +17,12 @@ function valueRoutes(router) {
     [requireCapability("analytics:view")],
     safeHandler(async (request, response) => {
       const period = request.query.period ?? ValueRecords.currentPeriod();
+      const currency = request.query.currency ?? null;
       response.status(200).json({
-        summary: await ValueRecords.summary(period),
+        summary: await ValueRecords.summary(
+          period,
+          currency ? { currency: String(currency) } : {}
+        ),
         categories: CATEGORIES,
       });
     })
@@ -71,21 +77,20 @@ function valueRoutes(router) {
   );
 
   /**
-   * The prospect calculator. Returns what WOULD be required, explicitly
-   * labelled as an assumption so it can never be read as a result.
+   * "Estimate value": the multiple that the entered savings and gross profit
+   * would produce against this deployment's configured fee. It reports what
+   * the inputs come to; it names no target to reach.
    */
   router.get(
-    "/value/scenarios",
+    "/value/estimate",
     [requireCapability("analytics:view")],
     safeHandler(async (request, response) => {
-      const grossProfitPerSaleCents =
-        Number(request.query.grossProfitPerSaleCents) || null;
-      const monthlyCostBaseCents =
-        Number(request.query.monthlyCostBaseCents) || null;
       response.status(200).json(
-        ValueRecords.qualificationScenarios({
-          grossProfitPerSaleCents,
-          monthlyCostBaseCents,
+        ValueRecords.estimateReturn({
+          recurringSavingsCents:
+            Number(request.query.recurringSavingsCents) || 0,
+          grossProfitCents: Number(request.query.grossProfitCents) || 0,
+          period: request.query.period ?? undefined,
         })
       );
     })
@@ -107,10 +112,23 @@ function valueRoutes(router) {
     })
   );
 
+  router.patch(
+    "/value/records/:uuid",
+    [requireCapability("settings:manage")],
+    safeHandler(async (request, response) => {
+      const result = await ValueRecords.update({
+        uuid: String(request.params.uuid),
+        changes: reqBody(request),
+        actor: response.locals.user,
+      });
+      response.status(result.success ? 200 : 400).json(result);
+    })
+  );
+
   router.post(
     "/value/records/:uuid/verification",
-    // Owner-only: verification is what turns a claim into a number the
-    // business will repeat to a customer.
+    // Owner-only: verification marks which portion of the total is evidenced,
+    // and rejection removes a record from it entirely.
     [requireCapability("billing:view")],
     safeHandler(async (request, response) => {
       const { verification, note = null } = reqBody(request);

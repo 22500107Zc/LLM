@@ -187,7 +187,8 @@ Everything under this repository's own control passes. The one failing gate is
 proved to be upstream's and environmental.
 
 **This is a verdict on the software. It is not a statement about business
-return.** Passing tests say the product works. They say nothing about whether a
-customer will earn 90× or 100× the fee — that is measured per customer, from
-verified records, on the Value page, after the product has been in use. The
-delivery report states the commercial verdict separately, and it is not GO.
+return.** Passing tests say the product works. They say nothing about what any
+particular customer will get back — that is measured per customer, from their
+own records, on the Value page, after the product has been in use. The Value
+page reports whatever that turns out to be; it sets no target and issues no
+verdict, so there is no commercial pass or fail for this release to report.

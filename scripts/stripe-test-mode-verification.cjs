@@ -1,11 +1,23 @@
 #!/usr/bin/env node
 /**
- * Stripe TEST-MODE end-to-end verification.
+ * Stripe SIMULATED integration test.
  *
- * Exercises the full commercial billing lifecycle against Stripe's test mode:
- * Checkout creation, signed webhook receipt, subscription activation, a failed
- * payment entering the grace state, restriction after the grace period,
- * recovery after payment, cancellation at period end, and replay protection.
+ * WHAT THIS PROVES AND WHAT IT DOES NOT
+ *
+ * This script creates a real test-mode Checkout Session through the
+ * application, and then constructs and signs its OWN webhook events - with a
+ * synthetic subscription id - to drive the deployment through its billing
+ * states. That makes it a thorough test of THIS APPLICATION'S webhook
+ * handling: signature verification, replay protection, deployment binding,
+ * the grace period, restriction and recovery.
+ *
+ * It does NOT prove:
+ *   - that a customer can complete the hosted checkout,
+ *   - that Stripe created a subscription or a paid invoice,
+ *   - that Stripe's own events reach the configured endpoint.
+ *
+ * Those need real Stripe-generated objects and real event delivery. That is a
+ * separate check: scripts/stripe-live-test-checkout.cjs.
  *
  * SAFETY
  *   - Refuses to run against a live key. Test mode only, always.
@@ -49,7 +61,7 @@ const PRICE_ID = process.env.STRIPE_PRICE_ID ?? "";
 const PLAN_AMOUNT_CENTS = Number(process.env.PLAN_AMOUNT_CENTS ?? 388888);
 
 const api = apiClient(BASE_URL);
-const results = new Results("STRIPE TEST-MODE VERIFICATION");
+const results = new Results("STRIPE SIMULATED INTEGRATION (self-signed events)");
 const call = (p, o) => api.call(p, o);
 
 (async () => {
@@ -229,7 +241,9 @@ async function run() {
   // Drive the lifecycle through signed webhooks so the deployment's state
   // machine is exercised exactly as Stripe would drive it.
   const periodEnd = Math.floor(Date.now() / 1000) + 30 * 86_400;
-  const subscriptionId = `sub_verify_${Date.now()}`;
+  // Synthetic, not a Stripe object. Everything below tests this
+  // application's handling of events, not Stripe's delivery of them.
+  const subscriptionId = `sub_simulated_${Date.now()}`;
 
   const activated = event("customer.subscription.updated", {
     id: subscriptionId,

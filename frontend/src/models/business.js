@@ -238,9 +238,11 @@ const Business = {
     records: (params = {}) =>
       request(`/value/records?${new URLSearchParams(params)}`),
     history: (uuid) => request(`/value/records/${uuid}/history`),
-    scenarios: (params = {}) =>
-      request(`/value/scenarios?${new URLSearchParams(params)}`),
+    estimate: (params = {}) =>
+      request(`/value/estimate?${new URLSearchParams(params)}`),
     create: (body) => request("/value/records", { method: "POST", body }),
+    update: (uuid, changes) =>
+      request(`/value/records/${uuid}`, { method: "PATCH", body: changes }),
     setVerification: (uuid, verification, note = null) =>
       request(`/value/records/${uuid}/verification`, {
         method: "POST",

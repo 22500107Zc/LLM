@@ -266,10 +266,12 @@ PATHS="$(wc -l < "$OUT/hardcoded-paths.log")"
   || fail "$PATHS hardcoded developer path(s)" "hardcoded-paths.log"
 
 log "searching for fixed test credentials"
+# A value built from a command substitution is generated per run, not fixed.
 grep -rniE "password\s*[:=]\s*[\"'][^\"'\$][^\"']{3,}[\"']" \
   --include="*.js" --include="*.cjs" --include="*.sh" \
   "$ROOT/scripts" 2>/dev/null \
   | grep -v node_modules | grep -v "SEED_PASSWORD\|DOC_TEST_PASSWORD\|ACCEPTANCE_SEED_PASSWORD" \
+  | grep -vE '\$\(|\$\{|ephemeralPassword|openssl' \
   > "$OUT/fixed-credentials.log" 2>&1
 CREDS="$(wc -l < "$OUT/fixed-credentials.log")"
 [ "$CREDS" = "0" ] \
