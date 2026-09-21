@@ -30,8 +30,12 @@ function answerText(response) {
  */
 function summarize(turns = []) {
   const firstQuestion = turns.find((turn) => turn.prompt)?.prompt ?? "";
-  const lastAnswer = [...turns].reverse().find((turn) => turn.answer)?.answer ?? "";
-  const opening = String(firstQuestion).replace(/\s+/g, " ").trim().slice(0, 180);
+  const lastAnswer =
+    [...turns].reverse().find((turn) => turn.answer)?.answer ?? "";
+  const opening = String(firstQuestion)
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180);
   const closing = String(lastAnswer).replace(/\s+/g, " ").trim().slice(0, 180);
   if (!opening) return "No visitor message recorded.";
   return `Asked about: "${opening}"${closing ? ` — Last reply: "${closing}"` : ""}`;
@@ -51,60 +55,74 @@ const Conversations = {
     const since = options.days
       ? new Date(Date.now() - Number(options.days) * 86_400_000)
       : null;
-    const search = options.search ? String(options.search).toLowerCase().trim() : null;
+    const search = options.search
+      ? String(options.search).toLowerCase().trim()
+      : null;
 
     const timeFilter = since ? { createdAt: { gte: since } } : {};
-    const wantInternal = !options.channel || options.channel === CHANNELS.INTERNAL;
+    const wantInternal =
+      !options.channel || options.channel === CHANNELS.INTERNAL;
     const wantPublic = !options.channel || options.channel === CHANNELS.PUBLIC;
 
-    const [internalRows, publicRows, agents, embedConfigs, reviews, leads, escalations] =
-      await Promise.all([
-        wantInternal
-          ? prisma.workspace_chats.findMany({
-              where: { ...timeFilter, include: true },
-              select: {
-                id: true,
-                workspaceId: true,
-                prompt: true,
-                response: true,
-                user_id: true,
-                thread_id: true,
-                feedbackScore: true,
-                createdAt: true,
-              },
-              orderBy: { createdAt: "asc" },
-            })
-          : [],
-        wantPublic
-          ? prisma.embed_chats.findMany({
-              where: { ...timeFilter, include: true },
-              select: {
-                id: true,
-                embed_id: true,
-                prompt: true,
-                response: true,
-                session_id: true,
-                connection_information: true,
-                createdAt: true,
-              },
-              orderBy: { createdAt: "asc" },
-            })
-          : [],
-        prisma.agent_profiles.findMany({
-          select: { uuid: true, name: true, workspace_id: true },
-        }),
-        prisma.embed_configs.findMany({ select: { id: true, workspace_id: true, uuid: true } }),
-        prisma.conversation_reviews.findMany(),
-        prisma.leads.findMany({ select: { session_id: true } }),
-        prisma.escalations.findMany({ select: { session_id: true } }),
-      ]);
+    const [
+      internalRows,
+      publicRows,
+      agents,
+      embedConfigs,
+      reviews,
+      leads,
+      escalations,
+    ] = await Promise.all([
+      wantInternal
+        ? prisma.workspace_chats.findMany({
+            where: { ...timeFilter, include: true },
+            select: {
+              id: true,
+              workspaceId: true,
+              prompt: true,
+              response: true,
+              user_id: true,
+              thread_id: true,
+              feedbackScore: true,
+              createdAt: true,
+            },
+            orderBy: { createdAt: "asc" },
+          })
+        : [],
+      wantPublic
+        ? prisma.embed_chats.findMany({
+            where: { ...timeFilter, include: true },
+            select: {
+              id: true,
+              embed_id: true,
+              prompt: true,
+              response: true,
+              session_id: true,
+              connection_information: true,
+              createdAt: true,
+            },
+            orderBy: { createdAt: "asc" },
+          })
+        : [],
+      prisma.agent_profiles.findMany({
+        select: { uuid: true, name: true, workspace_id: true },
+      }),
+      prisma.embed_configs.findMany({
+        select: { id: true, workspace_id: true, uuid: true },
+      }),
+      prisma.conversation_reviews.findMany(),
+      prisma.leads.findMany({ select: { session_id: true } }),
+      prisma.escalations.findMany({ select: { session_id: true } }),
+    ]);
 
     const agentByWorkspace = new Map(agents.map((a) => [a.workspace_id, a]));
     const embedById = new Map(embedConfigs.map((e) => [e.id, e]));
     const reviewByKey = new Map(
       reviews.map((r) => [`${r.channel}:${r.reference_id}`, r])
     );
-    const leadSessions = new Set(leads.map((l) => l.session_id).filter(Boolean));
+    const leadSessions = new Set(
+      leads.map((l) => l.session_id).filter(Boolean)
+    );
     const escalatedSessions = new Set(
       escalations.map((e) => e.session_id).filter(Boolean)
     );
@@ -148,7 +166,9 @@ const Conversations = {
       const entry = grouped.get(`public|${key}`) ?? {
         channel: CHANNELS.PUBLIC,
         referenceId: key,
-        agentName: agent?.name ?? (embed ? `Embed ${embed.uuid.slice(0, 8)}` : "Unknown agent"),
+        agentName:
+          agent?.name ??
+          (embed ? `Embed ${embed.uuid.slice(0, 8)}` : "Unknown agent"),
         agentUuid: agent?.uuid ?? null,
         workspaceId: embed?.workspace_id ?? null,
         userId: null,
@@ -185,8 +205,12 @@ const Conversations = {
         messageCount: entry.turns.length,
         startedAt: entry.firstAt,
         lastMessageAt: entry.lastAt,
-        leadGenerated: entry.sessionId ? leadSessions.has(entry.sessionId) : false,
-        escalated: entry.sessionId ? escalatedSessions.has(entry.sessionId) : false,
+        leadGenerated: entry.sessionId
+          ? leadSessions.has(entry.sessionId)
+          : false,
+        escalated: entry.sessionId
+          ? escalatedSessions.has(entry.sessionId)
+          : false,
         feedback: entry.feedback,
         reviewed: Boolean(review?.reviewed),
         reviewedAt: review?.reviewed_at ?? null,
@@ -200,8 +224,12 @@ const Conversations = {
       conversations = conversations.filter((conversation) =>
         conversation.turns.some(
           (turn) =>
-            String(turn.prompt ?? "").toLowerCase().includes(search) ||
-            String(turn.answer ?? "").toLowerCase().includes(search)
+            String(turn.prompt ?? "")
+              .toLowerCase()
+              .includes(search) ||
+            String(turn.answer ?? "")
+              .toLowerCase()
+              .includes(search)
         )
       );
 
@@ -209,11 +237,15 @@ const Conversations = {
       conversations = conversations.filter((c) => c.reviewed);
     if (options.reviewed === false)
       conversations = conversations.filter((c) => !c.reviewed);
-    if (options.escalatedOnly) conversations = conversations.filter((c) => c.escalated);
-    if (options.leadsOnly) conversations = conversations.filter((c) => c.leadGenerated);
+    if (options.escalatedOnly)
+      conversations = conversations.filter((c) => c.escalated);
+    if (options.leadsOnly)
+      conversations = conversations.filter((c) => c.leadGenerated);
 
     conversations.sort(
-      (a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
+      (a, b) =>
+        new Date(b.lastMessageAt).getTime() -
+        new Date(a.lastMessageAt).getTime()
     );
 
     const total = conversations.length;
@@ -224,7 +256,8 @@ const Conversations = {
       offset,
       limit,
       // The list view does not need full transcripts.
-      conversations: page.map(({ turns, ...rest }) => rest),
+      // The list view drops transcripts; they are fetched per conversation.
+      conversations: page.map(({ turns: _turns, ...rest }) => rest),
     };
   },
 
@@ -236,7 +269,9 @@ const Conversations = {
   /** Internal helper - rebuilds one conversation including its turns. */
   _withTurns: async function ({ channel, referenceId }) {
     const listing = await this.list({ channel, limit: 500 });
-    const match = listing.conversations.find((c) => c.referenceId === referenceId);
+    const match = listing.conversations.find(
+      (c) => c.referenceId === referenceId
+    );
     if (!match) return null;
 
     // Re-fetch the turns for just this conversation.
@@ -279,7 +314,13 @@ const Conversations = {
   },
 
   /** Marks a conversation reviewed and optionally attaches a note. */
-  review: async function ({ channel, referenceId, reviewed = true, note = null, actor = null }) {
+  review: async function ({
+    channel,
+    referenceId,
+    reviewed = true,
+    note = null,
+    actor = null,
+  }) {
     try {
       const record = await prisma.conversation_reviews.upsert({
         where: {

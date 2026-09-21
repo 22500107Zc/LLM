@@ -40,7 +40,9 @@ const MAX_METADATA_BYTES = 8_000;
 const MAX_STRING_LENGTH = 512;
 
 function normalizeKey(key) {
-  return String(key).toLowerCase().replace(/[^a-z0-9]/g, "");
+  return String(key)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }
 
 function isRedactedKey(key) {
@@ -139,9 +141,10 @@ const AuditLog = {
               ? String(actor.label).slice(0, 120)
               : null,
           resource: resource ? String(resource).slice(0, 120) : null,
-          resource_id: resourceId !== null && resourceId !== undefined
-            ? String(resourceId).slice(0, 120)
-            : null,
+          resource_id:
+            resourceId !== null && resourceId !== undefined
+              ? String(resourceId).slice(0, 120)
+              : null,
           metadata: serialized,
           ip_address: ip ? String(ip).slice(0, 64) : null,
         },

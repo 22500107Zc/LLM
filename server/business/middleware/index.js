@@ -28,7 +28,9 @@ async function attachBusinessRole(_request, response, next) {
       // Single-user mode has no user record; treat the authenticated operator
       // as the owner so a non-production deployment remains usable.
       response.locals.businessRole = Team.BUSINESS_ROLES.OWNER;
-      response.locals.capabilities = Team.capabilitiesFor(Team.BUSINESS_ROLES.OWNER);
+      response.locals.capabilities = Team.capabilitiesFor(
+        Team.BUSINESS_ROLES.OWNER
+      );
       return next();
     }
     // A deployment must always have exactly one Owner; without this the first
@@ -41,7 +43,9 @@ async function attachBusinessRole(_request, response, next) {
     return next();
   } catch (error) {
     console.error("[Business] role resolution failed:", error.message);
-    return response.status(500).json({ error: "Unable to resolve permissions." });
+    return response
+      .status(500)
+      .json({ error: "Unable to resolve permissions." });
   }
 }
 
@@ -86,7 +90,8 @@ function createRateLimiter({
   const buckets = new Map();
 
   // Periodically drop expired buckets so the map cannot grow unbounded.
-  const sweeper = setInterval(() => {
+  // Unreferenced on purpose: `.unref()` keeps it from holding the process open.
+  setInterval(() => {
     const now = Date.now();
     for (const [key, bucket] of buckets.entries())
       if (bucket.resetAt <= now) buckets.delete(key);
@@ -107,10 +112,16 @@ function createRateLimiter({
     const remaining = Math.max(0, max - bucket.count);
     response.setHeader("X-RateLimit-Limit", String(max));
     response.setHeader("X-RateLimit-Remaining", String(remaining));
-    response.setHeader("X-RateLimit-Reset", String(Math.ceil(bucket.resetAt / 1000)));
+    response.setHeader(
+      "X-RateLimit-Reset",
+      String(Math.ceil(bucket.resetAt / 1000))
+    );
 
     if (bucket.count > max) {
-      response.setHeader("Retry-After", String(Math.ceil((bucket.resetAt - now) / 1000)));
+      response.setHeader(
+        "Retry-After",
+        String(Math.ceil((bucket.resetAt - now) / 1000))
+      );
       return response.status(429).json({ error: "rate_limited", message });
     }
 

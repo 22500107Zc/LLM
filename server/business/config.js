@@ -31,7 +31,9 @@ function bool(key, fallback = false) {
   const value = process.env[key];
   if (value === undefined || value === null || String(value).trim() === "")
     return fallback;
-  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+  return ["1", "true", "yes", "on"].includes(
+    String(value).trim().toLowerCase()
+  );
 }
 
 function int(key, fallback) {
@@ -60,7 +62,10 @@ const config = {
       primaryDomain: str("PRIMARY_DOMAIN", ""),
       supportEmail: str("SUPPORT_EMAIL", ""),
       primaryColor: color("PRIMARY_COLOR", "#2563eb"),
-      tagline: str("APP_TAGLINE", "Your company's private AI operations platform"),
+      tagline: str(
+        "APP_TAGLINE",
+        "Your company's private AI operations platform"
+      ),
       poweredByNotice: str("POWERED_BY_NOTICE", ""),
     };
   },
@@ -136,7 +141,10 @@ const config = {
         pass: str("SMTP_PASSWORD", ""),
         from: str("SMTP_FROM", str("SUPPORT_EMAIL", "")),
       },
-      leadNotificationEmail: str("LEAD_NOTIFICATION_EMAIL", str("SUPPORT_EMAIL", "")),
+      leadNotificationEmail: str(
+        "LEAD_NOTIFICATION_EMAIL",
+        str("SUPPORT_EMAIL", "")
+      ),
       escalationNotificationEmail: str(
         "ESCALATION_NOTIFICATION_EMAIL",
         str("SUPPORT_EMAIL", "")
@@ -154,7 +162,10 @@ const config = {
       healthCheckToken: str("HEALTHCHECK_TOKEN", ""),
       publicRateLimitPerMinute: int("PUBLIC_RATE_LIMIT_PER_MINUTE", 30),
       publicRateLimitBurst: int("PUBLIC_RATE_LIMIT_BURST", 10),
-      allowPrivateNetworkWebhooks: bool("ALLOW_PRIVATE_NETWORK_WEBHOOKS", false),
+      allowPrivateNetworkWebhooks: bool(
+        "ALLOW_PRIVATE_NETWORK_WEBHOOKS",
+        false
+      ),
     };
   },
 

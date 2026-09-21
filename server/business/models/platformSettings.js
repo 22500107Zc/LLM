@@ -29,7 +29,8 @@ const ONBOARDING_STEPS = Object.freeze([
   {
     key: "company",
     title: "Company information",
-    description: "Tell us who you are so the platform can speak for your business.",
+    description:
+      "Tell us who you are so the platform can speak for your business.",
   },
   {
     key: "owner",
@@ -39,7 +40,8 @@ const ONBOARDING_STEPS = Object.freeze([
   {
     key: "provider",
     title: "Connect your AI provider",
-    description: "Add your own AI provider credentials so your data stays under your contract.",
+    description:
+      "Add your own AI provider credentials so your data stays under your contract.",
   },
   {
     key: "knowledge",
@@ -49,7 +51,8 @@ const ONBOARDING_STEPS = Object.freeze([
   {
     key: "first_agent",
     title: "Create your first AI agent",
-    description: "Pick a starting point such as Customer Support or Internal Knowledge.",
+    description:
+      "Pick a starting point such as Customer Support or Internal Knowledge.",
   },
   {
     key: "test_agent",
@@ -79,12 +82,14 @@ const ONBOARDING_STEPS = Object.freeze([
   {
     key: "billing",
     title: "Confirm billing",
-    description: "Check your subscription is active and your invoices are reaching you.",
+    description:
+      "Check your subscription is active and your invoices are reaching you.",
   },
   {
     key: "go_live",
     title: "Go live",
-    description: "Enable your website agent and start answering real questions.",
+    description:
+      "Enable your website agent and start answering real questions.",
   },
 ]);
 
@@ -146,13 +151,14 @@ const PlatformSettings = {
 
   /** The company profile, falling back to deployment environment values. */
   companyProfile: async function () {
-    const [name, website, industry, description, supportEmail] = await Promise.all([
-      this.get(KEYS.COMPANY_NAME),
-      this.get(KEYS.COMPANY_WEBSITE),
-      this.get(KEYS.COMPANY_INDUSTRY),
-      this.get(KEYS.COMPANY_DESCRIPTION),
-      this.get(KEYS.SUPPORT_EMAIL),
-    ]);
+    const [name, website, industry, description, supportEmail] =
+      await Promise.all([
+        this.get(KEYS.COMPANY_NAME),
+        this.get(KEYS.COMPANY_WEBSITE),
+        this.get(KEYS.COMPANY_INDUSTRY),
+        this.get(KEYS.COMPANY_DESCRIPTION),
+        this.get(KEYS.SUPPORT_EMAIL),
+      ]);
 
     return {
       name: name || config.customer.name || config.branding.companyName,
@@ -172,18 +178,27 @@ const PlatformSettings = {
     const { Billing } = require("./billing");
     const { Team } = require("./team");
 
-    const [profile, agentCount, publicAgentCount, documentCount, userCount, embedCount, integrationCount, billingRecord, owner] =
-      await Promise.all([
-        this.companyProfile(),
-        prisma.agent_profiles.count(),
-        prisma.agent_profiles.count({ where: { visibility: "public" } }),
-        prisma.workspace_documents.count(),
-        prisma.users.count(),
-        prisma.embed_configs.count({ where: { enabled: true } }),
-        prisma.integrations.count({ where: { enabled: true } }),
-        Billing.get(),
-        Team.owner(),
-      ]);
+    const [
+      profile,
+      agentCount,
+      publicAgentCount,
+      documentCount,
+      userCount,
+      embedCount,
+      integrationCount,
+      billingRecord,
+      owner,
+    ] = await Promise.all([
+      this.companyProfile(),
+      prisma.agent_profiles.count(),
+      prisma.agent_profiles.count({ where: { visibility: "public" } }),
+      prisma.workspace_documents.count(),
+      prisma.users.count(),
+      prisma.embed_configs.count({ where: { enabled: true } }),
+      prisma.integrations.count({ where: { enabled: true } }),
+      Billing.get(),
+      Team.owner(),
+    ]);
 
     const providerConfigured = Boolean(
       process.env.LLM_PROVIDER &&
@@ -237,7 +252,9 @@ const PlatformSettings = {
     await this.set(KEYS.ONBOARDING_STATE, state, { actor, audit: false });
 
     if (step === "go_live" && complete)
-      await this.set(KEYS.GO_LIVE_AT, new Date().toISOString(), { audit: false });
+      await this.set(KEYS.GO_LIVE_AT, new Date().toISOString(), {
+        audit: false,
+      });
 
     await AuditLog.log({
       action: "onboarding.step_updated",

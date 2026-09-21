@@ -27,7 +27,8 @@ const REVIEW_THRESHOLD = 0.6; // most concepts
 
 function parseConcepts(value) {
   if (!value) return [];
-  if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean);
+  if (Array.isArray(value))
+    return value.map((v) => String(v).trim()).filter(Boolean);
   try {
     const parsed = JSON.parse(value);
     if (Array.isArray(parsed))
@@ -62,7 +63,13 @@ function conceptPresent(answer, concept) {
  * Grades a single answer.
  * @returns {{verdict: string, score: number, detail: string}}
  */
-function grade({ answer, concepts = [], requiredSource = null, sources = [], errored = false }) {
+function grade({
+  answer,
+  concepts = [],
+  requiredSource = null,
+  sources = [],
+  errored = false,
+}) {
   if (errored)
     return {
       verdict: VERDICTS.FAILED,
@@ -151,13 +158,18 @@ const AIQuality = {
           expected_answer: params.expectedAnswer
             ? String(params.expectedAnswer).slice(0, 4_000)
             : null,
-          expected_concepts: JSON.stringify(parseConcepts(params.expectedConcepts)),
+          expected_concepts: JSON.stringify(
+            parseConcepts(params.expectedConcepts)
+          ),
           required_source: params.requiredSource
             ? String(params.requiredSource).slice(0, 500)
             : null,
-          agent_profile_id: params.agentProfileId ? Number(params.agentProfileId) : null,
+          agent_profile_id: params.agentProfileId
+            ? Number(params.agentProfileId)
+            : null,
           workspace_id: params.workspaceId ? Number(params.workspaceId) : null,
-          enabled: params.enabled === undefined ? true : Boolean(params.enabled),
+          enabled:
+            params.enabled === undefined ? true : Boolean(params.enabled),
           createdBy: params.actor?.id ? Number(params.actor.id) : null,
         },
       });
@@ -186,7 +198,9 @@ const AIQuality = {
           ? String(patch.expectedAnswer).slice(0, 4_000)
           : null;
       if (patch.expectedConcepts !== undefined)
-        data.expected_concepts = JSON.stringify(parseConcepts(patch.expectedConcepts));
+        data.expected_concepts = JSON.stringify(
+          parseConcepts(patch.expectedConcepts)
+        );
       if (patch.requiredSource !== undefined)
         data.required_source = patch.requiredSource
           ? String(patch.requiredSource).slice(0, 500)
@@ -254,7 +268,6 @@ const AIQuality = {
    * pass genuinely means the production path answers correctly.
    */
   runTest: async function (test) {
-    const { AgentProfile } = require("../models/agentProfile");
     const { Workspace } = require("../../models/workspace");
 
     let workspaceId = test.workspace_id;
@@ -355,14 +368,18 @@ const AIQuality = {
           test_id: test.id,
           verdict: outcome.verdict,
           score: outcome.score ?? null,
-          answer: outcome.answer ? String(outcome.answer).slice(0, 8_000) : null,
+          answer: outcome.answer
+            ? String(outcome.answer).slice(0, 8_000)
+            : null,
           sources: JSON.stringify(
             (outcome.sources ?? [])
               .slice(0, 10)
               .map((s) => s?.title ?? s?.metadata?.title ?? null)
               .filter(Boolean)
           ),
-          detail: outcome.detail ? String(outcome.detail).slice(0, 2_000) : null,
+          detail: outcome.detail
+            ? String(outcome.detail).slice(0, 2_000)
+            : null,
         },
       });
     }

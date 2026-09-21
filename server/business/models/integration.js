@@ -54,7 +54,12 @@ const PROVIDER_SPEC = Object.freeze({
       "Sends a notification email. Requires SMTP to be configured on the deployment.",
     configFields: [
       { key: "to", label: "Recipient address", type: "email", required: true },
-      { key: "subjectPrefix", label: "Subject prefix", type: "text", required: false },
+      {
+        key: "subjectPrefix",
+        label: "Subject prefix",
+        type: "text",
+        required: false,
+      },
     ],
     secretFields: [],
     implemented: true,
@@ -88,7 +93,12 @@ const PROVIDER_SPEC = Object.freeze({
     description:
       "Delivers leads to a Salesforce Web-to-Lead endpoint. Full API integration is available as a documented extension.",
     configFields: [
-      { key: "oid", label: "Organization ID (OID)", type: "text", required: true },
+      {
+        key: "oid",
+        label: "Organization ID (OID)",
+        type: "text",
+        required: true,
+      },
       {
         key: "endpoint",
         label: "Web-to-Lead endpoint",
@@ -172,7 +182,9 @@ const Integration = {
             ? encryptor().encrypt(JSON.stringify(secrets))
             : null,
           events: JSON.stringify(
-            selectedEvents.length ? selectedEvents : ["lead.created", "escalation.created"]
+            selectedEvents.length
+              ? selectedEvents
+              : ["lead.created", "escalation.created"]
           ),
           createdBy: actor?.id ? Number(actor.id) : null,
         },
@@ -203,9 +215,11 @@ const Integration = {
       if (!existing) return { success: false, error: "Integration not found." };
 
       const data = { lastUpdatedAt: new Date() };
-      if (patch.name !== undefined) data.name = String(patch.name).slice(0, 160);
+      if (patch.name !== undefined)
+        data.name = String(patch.name).slice(0, 160);
       if (patch.enabled !== undefined) data.enabled = Boolean(patch.enabled);
-      if (patch.config !== undefined) data.config = JSON.stringify(patch.config ?? {});
+      if (patch.config !== undefined)
+        data.config = JSON.stringify(patch.config ?? {});
       if (patch.events !== undefined)
         data.events = JSON.stringify(
           (Array.isArray(patch.events) ? patch.events : []).filter((e) =>

@@ -23,7 +23,8 @@ function knowledgeRoutes(router) {
         const agent = await prisma.agent_profiles.findUnique({
           where: { uuid: String(agentUuid) },
         });
-        if (!agent) return response.status(404).json({ error: "Agent not found." });
+        if (!agent)
+          return response.status(404).json({ error: "Agent not found." });
         workspaceFilter = { workspaceId: agent.workspace_id };
       }
 
@@ -117,12 +118,15 @@ function knowledgeRoutes(router) {
       const agent = await prisma.agent_profiles.findUnique({
         where: { uuid: String(agentUuid) },
       });
-      if (!agent) return response.status(404).json({ error: "Agent not found." });
+      if (!agent)
+        return response.status(404).json({ error: "Agent not found." });
 
       const { Workspace } = require("../../models/workspace");
       const workspace = await Workspace.get({ id: agent.workspace_id });
       if (!workspace)
-        return response.status(404).json({ error: "The agent's workspace is missing." });
+        return response
+          .status(404)
+          .json({ error: "The agent's workspace is missing." });
 
       const { failedToEmbed = [], errors = [] } = await Document.addDocuments(
         workspace,
@@ -183,14 +187,21 @@ function knowledgeRoutes(router) {
       const doc = await prisma.workspace_documents.findFirst({
         where: { docId: String(request.params.docId) },
       });
-      if (!doc) return response.status(404).json({ error: "Document not found." });
+      if (!doc)
+        return response.status(404).json({ error: "Document not found." });
 
       const workspace = await Workspace.get({ id: doc.workspaceId });
       if (!workspace)
-        return response.status(404).json({ error: "The document's workspace is missing." });
+        return response
+          .status(404)
+          .json({ error: "The document's workspace is missing." });
 
       // Remove then re-add so the vector store is rebuilt from the source file.
-      await Document.removeDocuments(workspace, [doc.docpath], response.locals.user?.id);
+      await Document.removeDocuments(
+        workspace,
+        [doc.docpath],
+        response.locals.user?.id
+      );
       const { failedToEmbed = [] } = await Document.addDocuments(
         workspace,
         [doc.docpath],
@@ -202,12 +213,17 @@ function knowledgeRoutes(router) {
         category: AuditLog.CATEGORIES.KNOWLEDGE,
         resource: "document",
         resourceId: doc.docId,
-        metadata: { filename: doc.filename, succeeded: failedToEmbed.length === 0 },
+        metadata: {
+          filename: doc.filename,
+          succeeded: failedToEmbed.length === 0,
+        },
       });
 
       response.status(200).json({
         success: failedToEmbed.length === 0,
-        error: failedToEmbed.length ? "The document could not be re-processed." : null,
+        error: failedToEmbed.length
+          ? "The document could not be re-processed."
+          : null,
       });
     })
   );

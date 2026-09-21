@@ -27,7 +27,8 @@ function insightRoutes(router) {
         channel,
         search,
         days: days ? Number(days) : null,
-        reviewed: reviewed === "true" ? true : reviewed === "false" ? false : null,
+        reviewed:
+          reviewed === "true" ? true : reviewed === "false" ? false : null,
         escalatedOnly: escalated === "true",
         leadsOnly: leads === "true",
         limit: Number(limit),
@@ -143,9 +144,10 @@ function insightRoutes(router) {
         KnowledgeGaps.count(clause),
       ]);
 
-      const agents = await require("../../utils/prisma").agent_profiles.findMany({
-        select: { id: true, name: true, uuid: true },
-      });
+      const agents =
+        await require("../../utils/prisma").agent_profiles.findMany({
+          select: { id: true, name: true, uuid: true },
+        });
       const byId = new Map(agents.map((a) => [a.id, a]));
 
       response.status(200).json({
@@ -232,7 +234,8 @@ function insightRoutes(router) {
         agentProfileId,
         actor: response.locals.user,
       });
-      if (!result.test) return response.status(400).json({ error: result.error });
+      if (!result.test)
+        return response.status(400).json({ error: result.error });
       response.status(200).json({ test: result.test });
     })
   );
@@ -290,7 +293,8 @@ function insightRoutes(router) {
     [requireCapability("quality:view")],
     safeHandler(async (request, response) => {
       const result = await AIQuality.runResults(String(request.params.uuid));
-      if (!result.run) return response.status(404).json({ error: "Run not found." });
+      if (!result.run)
+        return response.status(404).json({ error: "Run not found." });
       response.status(200).json(result);
     })
   );

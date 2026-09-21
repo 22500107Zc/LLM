@@ -26,7 +26,8 @@ const VISIBILITY = Object.freeze({ PRIVATE: "private", PUBLIC: "public" });
 const TEMPLATES = Object.freeze({
   customer_support: {
     label: "Customer Support Agent",
-    description: "Answers customer questions from your approved company knowledge.",
+    description:
+      "Answers customer questions from your approved company knowledge.",
     visibility: VISIBILITY.PUBLIC,
     chatMode: "query",
     temperature: 0.2,
@@ -44,7 +45,8 @@ Rules:
   },
   sales_qualification: {
     label: "Sales Qualification Agent",
-    description: "Qualifies inbound inquiries and captures leads for your sales team.",
+    description:
+      "Qualifies inbound inquiries and captures leads for your sales team.",
     visibility: VISIBILITY.PUBLIC,
     chatMode: "query",
     temperature: 0.3,
@@ -62,7 +64,8 @@ Rules:
   },
   internal_knowledge: {
     label: "Internal Knowledge Agent",
-    description: "Lets employees search internal company knowledge conversationally.",
+    description:
+      "Lets employees search internal company knowledge conversationally.",
     visibility: VISIBILITY.PRIVATE,
     chatMode: "query",
     temperature: 0.2,
@@ -79,7 +82,8 @@ Rules:
   },
   employee_assistant: {
     label: "Employee Assistant",
-    description: "Helps staff with policies, processes and day-to-day internal questions.",
+    description:
+      "Helps staff with policies, processes and day-to-day internal questions.",
     visibility: VISIBILITY.PRIVATE,
     chatMode: "chat",
     temperature: 0.4,
@@ -156,7 +160,8 @@ const AgentProfile = {
     const template = TEMPLATES[params.template] ?? null;
     const visibility =
       params.visibility === VISIBILITY.PUBLIC ||
-      (params.visibility === undefined && template?.visibility === VISIBILITY.PUBLIC)
+      (params.visibility === undefined &&
+        template?.visibility === VISIBILITY.PUBLIC)
         ? VISIBILITY.PUBLIC
         : VISIBILITY.PRIVATE;
 
@@ -168,8 +173,7 @@ const AgentProfile = {
     const systemPrompt = this.renderPrompt(
       params.systemPrompt ?? template?.systemPrompt ?? ""
     );
-    const fallback =
-      clean(params.fallbackMessage, 1_000) ?? DEFAULT_FALLBACK;
+    const fallback = clean(params.fallbackMessage, 1_000) ?? DEFAULT_FALLBACK;
 
     try {
       const { workspace, message: workspaceError } = await Workspace.new(
@@ -180,7 +184,7 @@ const AgentProfile = {
           openAiTemp:
             params.temperature !== undefined
               ? Number(params.temperature)
-              : (template?.temperature ?? null),
+              : template?.temperature ?? null,
           chatMode: params.chatMode ?? template?.chatMode ?? "query",
           // The refusal response is what upstream returns when query mode finds
           // no sources - exactly the "approved knowledge only" behaviour.
@@ -191,7 +195,10 @@ const AgentProfile = {
       );
 
       if (!workspace)
-        return { agent: null, error: workspaceError ?? "Unable to create the workspace." };
+        return {
+          agent: null,
+          error: workspaceError ?? "Unable to create the workspace.",
+        };
 
       const agent = await prisma.agent_profiles.create({
         data: {
@@ -199,7 +206,9 @@ const AgentProfile = {
           name,
           description: clean(params.description, 1_000),
           avatar_url: clean(params.avatarUrl, 1_000),
-          template: params.template ? String(params.template).slice(0, 60) : null,
+          template: params.template
+            ? String(params.template).slice(0, 60)
+            : null,
           workspace_id: workspace.id,
           active: params.active === undefined ? true : Boolean(params.active),
           visibility,
@@ -208,7 +217,8 @@ const AgentProfile = {
             params.leadCapture ?? template?.leadCapture ?? false
           ),
           lead_capture_fields: JSON.stringify(
-            Array.isArray(params.leadCaptureFields) && params.leadCaptureFields.length
+            Array.isArray(params.leadCaptureFields) &&
+              params.leadCaptureFields.length
               ? params.leadCaptureFields.filter((f) =>
                   Lead.CONFIGURABLE_FIELDS.includes(f)
                 )
@@ -257,7 +267,8 @@ const AgentProfile = {
       if (!existing) return { success: false, error: "Agent not found." };
 
       const workspace = await Workspace.get({ id: existing.workspace_id });
-      if (!workspace) return { success: false, error: "Backing workspace is missing." };
+      if (!workspace)
+        return { success: false, error: "Backing workspace is missing." };
 
       // Promoting to public consumes one of the included public-agent slots.
       if (
@@ -287,9 +298,10 @@ const AgentProfile = {
         agentData.lead_capture_enabled = Boolean(patch.leadCapture);
       if (patch.leadCaptureFields !== undefined)
         agentData.lead_capture_fields = JSON.stringify(
-          (Array.isArray(patch.leadCaptureFields) ? patch.leadCaptureFields : []).filter(
-            (f) => Lead.CONFIGURABLE_FIELDS.includes(f)
-          )
+          (Array.isArray(patch.leadCaptureFields)
+            ? patch.leadCaptureFields
+            : []
+          ).filter((f) => Lead.CONFIGURABLE_FIELDS.includes(f))
         );
       if (patch.escalation !== undefined)
         agentData.escalation_enabled = Boolean(patch.escalation);
@@ -299,10 +311,13 @@ const AgentProfile = {
       // Workspace-owned settings.
       const workspaceData = {};
       if (patch.systemPrompt !== undefined)
-        workspaceData.openAiPrompt = this.renderPrompt(patch.systemPrompt ?? "");
+        workspaceData.openAiPrompt = this.renderPrompt(
+          patch.systemPrompt ?? ""
+        );
       if (patch.temperature !== undefined)
         workspaceData.openAiTemp = Number(patch.temperature);
-      if (patch.model !== undefined) workspaceData.chatModel = patch.model || null;
+      if (patch.model !== undefined)
+        workspaceData.chatModel = patch.model || null;
       if (patch.provider !== undefined)
         workspaceData.chatProvider = patch.provider || null;
       if (patch.chatMode !== undefined)

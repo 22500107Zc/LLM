@@ -55,7 +55,8 @@ const HUMAN_STATUS = Object.freeze({
 
 function toDate(value) {
   if (value === null || value === undefined) return null;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (value instanceof Date)
+    return Number.isNaN(value.getTime()) ? null : value;
   // Stripe returns unix seconds.
   if (typeof value === "number") {
     const date = new Date(value * 1000);
@@ -97,7 +98,10 @@ const Billing = {
         },
       });
     } catch (error) {
-      console.error("[Billing] failed to read subscription state:", error.message);
+      console.error(
+        "[Billing] failed to read subscription state:",
+        error.message
+      );
       return null;
     }
   },
@@ -131,7 +135,10 @@ const Billing = {
       }
       return next;
     } catch (error) {
-      console.error("[Billing] failed to update subscription state:", error.message);
+      console.error(
+        "[Billing] failed to update subscription state:",
+        error.message
+      );
       return null;
     }
   },
@@ -152,7 +159,7 @@ const Billing = {
       stripe_customer_id:
         typeof subscription.customer === "string"
           ? subscription.customer
-          : (subscription.customer?.id ?? current?.stripe_customer_id ?? null),
+          : subscription.customer?.id ?? current?.stripe_customer_id ?? null,
       stripe_price_id: price?.id ?? current?.stripe_price_id ?? null,
       status,
       collection_method: subscription.collection_method ?? null,
@@ -170,13 +177,16 @@ const Billing = {
 
     // Track when a dunning window opened so the grace period can be measured.
     const inDunning = [STATUS.PAST_DUE, STATUS.UNPAID].includes(status);
-    if (inDunning && !current?.past_due_since) patch.past_due_since = new Date();
+    if (inDunning && !current?.past_due_since)
+      patch.past_due_since = new Date();
     if (!inDunning) {
       patch.past_due_since = null;
       patch.restricted_at = null;
     }
 
-    return this.update(patch, { reason: context.reason ?? "subscription.sync" });
+    return this.update(patch, {
+      reason: context.reason ?? "subscription.sync",
+    });
   },
 
   /**
@@ -206,9 +216,11 @@ const Billing = {
       // webhook has not landed yet.
       if (
         current &&
-        [STATUS.PAST_DUE, STATUS.UNPAID, STATUS.PAYMENT_ACTION_REQUIRED].includes(
-          current.status
-        )
+        [
+          STATUS.PAST_DUE,
+          STATUS.UNPAID,
+          STATUS.PAYMENT_ACTION_REQUIRED,
+        ].includes(current.status)
       )
         patch.status = STATUS.ACTIVE;
     }
@@ -216,7 +228,10 @@ const Billing = {
     if (outcome === "failed") {
       patch.last_payment_status = "failed";
       if (!current?.past_due_since) patch.past_due_since = new Date();
-      if (current?.status === STATUS.ACTIVE || current?.status === STATUS.TRIALING)
+      if (
+        current?.status === STATUS.ACTIVE ||
+        current?.status === STATUS.TRIALING
+      )
         patch.status = STATUS.PAST_DUE;
     }
 
@@ -246,7 +261,8 @@ const Billing = {
     const base = {
       access: ACCESS.OK,
       status: record?.status ?? STATUS.UNCONFIGURED,
-      statusLabel: HUMAN_STATUS[record?.status ?? STATUS.UNCONFIGURED] ?? "Unknown",
+      statusLabel:
+        HUMAN_STATUS[record?.status ?? STATUS.UNCONFIGURED] ?? "Unknown",
       enforcementEnabled: policy.enforcementEnabled,
       gracePeriodDays: policy.gracePeriodDays,
       graceEndsAt: null,
@@ -337,12 +353,18 @@ const Billing = {
       };
     }
 
-    if ([STATUS.INCOMPLETE, STATUS.INCOMPLETE_EXPIRED, STATUS.PAUSED].includes(status))
+    if (
+      [STATUS.INCOMPLETE, STATUS.INCOMPLETE_EXPIRED, STATUS.PAUSED].includes(
+        status
+      )
+    )
       return {
         ...base,
-        access: status === STATUS.INCOMPLETE ? ACCESS.WARNING : ACCESS.RESTRICTED,
+        access:
+          status === STATUS.INCOMPLETE ? ACCESS.WARNING : ACCESS.RESTRICTED,
         reason: status,
-        message: "This subscription is not active. Please complete billing setup.",
+        message:
+          "This subscription is not active. Please complete billing setup.",
       };
 
     return base;

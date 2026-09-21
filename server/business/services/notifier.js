@@ -30,7 +30,9 @@ function mailer() {
   try {
     nodemailer = require("nodemailer");
   } catch {
-    console.error("[Notifier] nodemailer is not installed - email is disabled.");
+    console.error(
+      "[Notifier] nodemailer is not installed - email is disabled."
+    );
     return null;
   }
 
@@ -68,7 +70,10 @@ function describe(event, payload) {
       return {
         title: "New lead captured",
         lines: [
-          ["Name", [payload.first_name, payload.last_name].filter(Boolean).join(" ")],
+          [
+            "Name",
+            [payload.first_name, payload.last_name].filter(Boolean).join(" "),
+          ],
           ["Email", payload.email],
           ["Company", payload.company],
           ["Phone", payload.phone],
@@ -161,7 +166,9 @@ async function deliverEmail(integration, event, payload) {
   const { title, lines } = describe(event, payload);
   const prefix = cfg.subjectPrefix ? `${cfg.subjectPrefix} ` : "";
   const rows = lines
-    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .filter(
+      ([, value]) => value !== null && value !== undefined && value !== ""
+    )
     .map(
       ([label, value]) =>
         `<tr><td style="padding:4px 12px 4px 0;color:#666;vertical-align:top">${escapeHtml(
@@ -201,7 +208,9 @@ async function deliverSlack(integration, event, payload) {
   const text = [
     `*${title}* - ${config.branding.appName}`,
     ...lines
-      .filter(([, value]) => value !== null && value !== undefined && value !== "")
+      .filter(
+        ([, value]) => value !== null && value !== undefined && value !== ""
+      )
       .map(([label, value]) => `• *${label}:* ${String(value).slice(0, 500)}`),
   ].join("\n");
 
@@ -216,7 +225,10 @@ async function deliverHubSpot(integration, event, payload) {
   if (!secrets.accessToken)
     return { ok: false, error: "No HubSpot access token configured." };
   if (!payload.email)
-    return { ok: false, error: "HubSpot requires an email address on the lead." };
+    return {
+      ok: false,
+      error: "HubSpot requires an email address on the lead.",
+    };
 
   const properties = {
     email: payload.email,
@@ -235,19 +247,29 @@ async function deliverHubSpot(integration, event, payload) {
 
   // A 409 means the contact already exists, which is a success for our purposes.
   if (!result.ok && result.status === 409)
-    return { ok: true, status: 409, note: "Contact already exists in HubSpot." };
+    return {
+      ok: true,
+      status: 409,
+      note: "Contact already exists in HubSpot.",
+    };
   return result;
 }
 
 async function deliverSalesforce(integration, event, payload) {
   if (event !== "lead.created")
-    return { ok: true, status: 204, skipped: "Salesforce only receives leads." };
+    return {
+      ok: true,
+      status: 204,
+      skipped: "Salesforce only receives leads.",
+    };
 
   const cfg = JSON.parse(integration.config || "{}");
-  if (!cfg.oid) return { ok: false, error: "No Salesforce organization ID configured." };
+  if (!cfg.oid)
+    return { ok: false, error: "No Salesforce organization ID configured." };
 
   const endpoint =
-    cfg.endpoint || "https://webto.salesforce.com/servlet/servlet.WebToLead?encoding=UTF-8";
+    cfg.endpoint ||
+    "https://webto.salesforce.com/servlet/servlet.WebToLead?encoding=UTF-8";
 
   const check = await assertSafeDestination(endpoint);
   if (!check.ok) return { ok: false, error: check.reason };
@@ -287,7 +309,10 @@ async function deliverSalesforce(integration, event, payload) {
   } catch (error) {
     return {
       ok: false,
-      error: error?.name === "AbortError" ? "Salesforce timed out." : "Salesforce request failed.",
+      error:
+        error?.name === "AbortError"
+          ? "Salesforce timed out."
+          : "Salesforce request failed.",
     };
   } finally {
     clearTimeout(timeout);
@@ -385,7 +410,7 @@ async function test(integrationUuid) {
   let result;
   try {
     result = await deliver(integration, "lead.created", samplePayload);
-  } catch (error) {
+  } catch {
     result = { ok: false, error: "Delivery failed unexpectedly." };
   }
 

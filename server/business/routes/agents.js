@@ -14,13 +14,16 @@ function agentRoutes(router) {
     [requireCapability("agents:view")],
     safeHandler(async (_request, response) => {
       const agents = await AgentProfile.where({});
-      const hydrated = await Promise.all(agents.map((a) => AgentProfile.hydrate(a)));
+      const hydrated = await Promise.all(
+        agents.map((a) => AgentProfile.hydrate(a))
+      );
       const slots = await AgentProfile.publicAgentSlotAvailable();
       response.status(200).json({
         agents: hydrated,
         limits: {
           maxPublicAgents: config.limits.maxPublicAgents,
-          publicAgentsUsed: hydrated.filter((a) => a.visibility === "public").length,
+          publicAgentsUsed: hydrated.filter((a) => a.visibility === "public")
+            .length,
           publicSlotAvailable: slots.available,
         },
       });
@@ -43,8 +46,11 @@ function agentRoutes(router) {
     "/agents/:uuid",
     [requireCapability("agents:view")],
     safeHandler(async (request, response) => {
-      const agent = await AgentProfile.get({ uuid: String(request.params.uuid) });
-      if (!agent) return response.status(404).json({ error: "Agent not found." });
+      const agent = await AgentProfile.get({
+        uuid: String(request.params.uuid),
+      });
+      if (!agent)
+        return response.status(404).json({ error: "Agent not found." });
       response.status(200).json({ agent: await AgentProfile.hydrate(agent) });
     })
   );
@@ -75,8 +81,11 @@ function agentRoutes(router) {
         patch: reqBody(request),
         actor: response.locals.user,
       });
-      if (!result.success) return response.status(400).json({ error: result.error });
-      response.status(200).json({ agent: await AgentProfile.hydrate(result.agent) });
+      if (!result.success)
+        return response.status(400).json({ error: result.error });
+      response
+        .status(200)
+        .json({ agent: await AgentProfile.hydrate(result.agent) });
     })
   );
 
@@ -88,7 +97,8 @@ function agentRoutes(router) {
         uuid: String(request.params.uuid),
         actor: response.locals.user,
       });
-      if (!result.success) return response.status(400).json({ error: result.error });
+      if (!result.success)
+        return response.status(400).json({ error: result.error });
       response.status(200).json({ success: true });
     })
   );
@@ -156,9 +166,9 @@ function agentRoutes(router) {
         ? await AgentProfile.get({ uuid: String(body.agentUuid) })
         : null;
       if (!agent)
-        return response
-          .status(400)
-          .json({ error: "Select the AI agent this website agent should use." });
+        return response.status(400).json({
+          error: "Select the AI agent this website agent should use.",
+        });
 
       const domains = Array.isArray(body.allowlistDomains)
         ? body.allowlistDomains.map((d) => String(d).trim()).filter(Boolean)
@@ -202,7 +212,9 @@ function agentRoutes(router) {
         metadata: { agent: agent.name, domains },
       });
 
-      response.status(200).json({ websiteAgent: { uuid: embed.uuid, id: embed.id } });
+      response
+        .status(200)
+        .json({ websiteAgent: { uuid: embed.uuid, id: embed.id } });
     })
   );
 
@@ -212,8 +224,11 @@ function agentRoutes(router) {
     safeHandler(async (request, response) => {
       const { EmbedConfig } = require("../../models/embedConfig");
       const body = reqBody(request);
-      const embed = await EmbedConfig.get({ uuid: String(request.params.uuid) });
-      if (!embed) return response.status(404).json({ error: "Website agent not found." });
+      const embed = await EmbedConfig.get({
+        uuid: String(request.params.uuid),
+      });
+      if (!embed)
+        return response.status(404).json({ error: "Website agent not found." });
 
       const updates = {};
       if (body.enabled !== undefined) updates.enabled = Boolean(body.enabled);
@@ -227,7 +242,9 @@ function agentRoutes(router) {
         updates.message_limit = Number(body.messageLimit);
 
       if (body.allowlistDomains !== undefined) {
-        const domains = (Array.isArray(body.allowlistDomains) ? body.allowlistDomains : [])
+        const domains = (
+          Array.isArray(body.allowlistDomains) ? body.allowlistDomains : []
+        )
           .map((d) => String(d).trim())
           .filter(Boolean);
         if (config.security.requireEmbedAllowlist && !domains.length)
@@ -258,8 +275,11 @@ function agentRoutes(router) {
     [requireCapability("embeds:manage")],
     safeHandler(async (request, response) => {
       const { EmbedConfig } = require("../../models/embedConfig");
-      const embed = await EmbedConfig.get({ uuid: String(request.params.uuid) });
-      if (!embed) return response.status(404).json({ error: "Website agent not found." });
+      const embed = await EmbedConfig.get({
+        uuid: String(request.params.uuid),
+      });
+      if (!embed)
+        return response.status(404).json({ error: "Website agent not found." });
 
       await EmbedConfig.delete({ id: embed.id });
       await AuditLog.fromRequest(request, response, {
@@ -278,8 +298,11 @@ function agentRoutes(router) {
     [requireCapability("agents:view")],
     safeHandler(async (request, response) => {
       const { EmbedConfig } = require("../../models/embedConfig");
-      const embed = await EmbedConfig.get({ uuid: String(request.params.uuid) });
-      if (!embed) return response.status(404).json({ error: "Website agent not found." });
+      const embed = await EmbedConfig.get({
+        uuid: String(request.params.uuid),
+      });
+      if (!embed)
+        return response.status(404).json({ error: "Website agent not found." });
 
       const base =
         config.deployment.publicUrl ||
@@ -298,7 +321,9 @@ function agentRoutes(router) {
   src="${base}/embed/anythingllm-chat-widget.min.js">
 </script>`;
 
-      response.status(200).json({ snippet, embedId: embed.uuid, baseUrl: base });
+      response
+        .status(200)
+        .json({ snippet, embedId: embed.uuid, baseUrl: base });
     })
   );
 }

@@ -71,7 +71,9 @@ function platformRoutes(router, publicRouter) {
         metadata: { fields: fields.map(([key]) => key) },
       });
 
-      response.status(200).json({ company: await PlatformSettings.companyProfile() });
+      response
+        .status(200)
+        .json({ company: await PlatformSettings.companyProfile() });
     })
   );
 
@@ -126,7 +128,9 @@ function platformRoutes(router, publicRouter) {
 
       // Resolve actor names without exposing any other user attribute.
       const prisma = require("../../utils/prisma");
-      const actorIds = [...new Set(entries.map((e) => e.actor_id).filter(Boolean))];
+      const actorIds = [
+        ...new Set(entries.map((e) => e.actor_id).filter(Boolean)),
+      ];
       const users = actorIds.length
         ? await prisma.users.findMany({
             where: { id: { in: actorIds } },
@@ -189,7 +193,10 @@ function platformRoutes(router, publicRouter) {
     "/billing-state",
     safeHandler(async (_request, response) => {
       const access = await currentAccess();
-      const canSeeDetail = Team.can(response.locals.businessRole, "billing:view");
+      const canSeeDetail = Team.can(
+        response.locals.businessRole,
+        "billing:view"
+      );
       response.status(200).json({
         access: access.access,
         status: canSeeDetail ? access.status : null,

@@ -28,7 +28,8 @@ function notConfigured() {
  * @returns {Promise<{priceId: string|null, error: string|null}>}
  */
 async function resolvePriceId() {
-  if (config.stripe.priceId) return { priceId: config.stripe.priceId, error: null };
+  if (config.stripe.priceId)
+    return { priceId: config.stripe.priceId, error: null };
 
   const stripe = client();
   if (!stripe) return { priceId: null, error: "Billing is not configured." };
@@ -58,7 +59,10 @@ async function resolvePriceId() {
     return { priceId: match.id, error: null };
   } catch (error) {
     console.error("[Billing] price lookup failed:", error.message);
-    return { priceId: null, error: "Unable to resolve the subscription price." };
+    return {
+      priceId: null,
+      error: "Unable to resolve the subscription price.",
+    };
   }
 }
 
@@ -129,12 +133,16 @@ async function ensureCustomer(details = {}) {
       email: details.email || record?.billing_email || undefined,
       name: details.name || config.customer.name || undefined,
       metadata: {
-        deployment: config.customer.domain || config.branding.primaryDomain || "",
+        deployment:
+          config.customer.domain || config.branding.primaryDomain || "",
         platform: config.branding.appName,
       },
     });
     await Billing.update(
-      { stripe_customer_id: customer.id, billing_email: customer.email ?? null },
+      {
+        stripe_customer_id: customer.id,
+        billing_email: customer.email ?? null,
+      },
       { reason: "customer.created" }
     );
     return { customer, error: null };
@@ -232,26 +240,38 @@ async function createInvoicedSubscription(options = {}) {
       expand: ["latest_invoice"],
     });
 
-    await Billing.applySubscription(subscription, { reason: "invoice.subscription" });
+    await Billing.applySubscription(subscription, {
+      reason: "invoice.subscription",
+    });
     await AuditLog.log({
       action: "billing.invoiced_subscription_created",
       category: AuditLog.CATEGORIES.BILLING,
       actor: options.actor ?? null,
       resource: "subscription",
       resourceId: subscription.id,
-      metadata: { priceId, customerId: customer.id, collectionMethod: "send_invoice" },
+      metadata: {
+        priceId,
+        customerId: customer.id,
+        collectionMethod: "send_invoice",
+      },
     });
 
     const invoice = subscription.latest_invoice;
     return {
       success: true,
       subscriptionId: subscription.id,
-      invoiceId: typeof invoice === "string" ? invoice : (invoice?.id ?? null),
-      invoiceUrl: typeof invoice === "object" ? (invoice?.hosted_invoice_url ?? null) : null,
+      invoiceId: typeof invoice === "string" ? invoice : invoice?.id ?? null,
+      invoiceUrl:
+        typeof invoice === "object"
+          ? invoice?.hosted_invoice_url ?? null
+          : null,
     };
   } catch (error) {
     console.error("[Billing] invoiced subscription failed:", error.message);
-    return { success: false, error: "Unable to create the invoiced subscription." };
+    return {
+      success: false,
+      error: "Unable to create the invoiced subscription.",
+    };
   }
 }
 
@@ -308,7 +328,8 @@ async function syncFromStripe({ actor = null } = {}) {
   const stripe = client();
 
   const record = await Billing.get();
-  const subscriptionId = record?.stripe_subscription_id || config.stripe.subscriptionId;
+  const subscriptionId =
+    record?.stripe_subscription_id || config.stripe.subscriptionId;
   const customerId = record?.stripe_customer_id || config.stripe.customerId;
 
   try {
@@ -327,7 +348,9 @@ async function syncFromStripe({ actor = null } = {}) {
       });
       // Prefer a live subscription over a dead one.
       subscription =
-        list.data.find((s) => ["active", "trialing", "past_due", "unpaid"].includes(s.status)) ??
+        list.data.find((s) =>
+          ["active", "trialing", "past_due", "unpaid"].includes(s.status)
+        ) ??
         list.data[0] ??
         null;
     }
@@ -361,10 +384,16 @@ async function syncFromStripe({ actor = null } = {}) {
       metadata: { status: subscription.status },
     });
 
-    return { success: true, status: Billing.mapStripeStatus(subscription.status) };
+    return {
+      success: true,
+      status: Billing.mapStripeStatus(subscription.status),
+    };
   } catch (error) {
     console.error("[Billing] sync failed:", error.message);
-    return { success: false, error: "Unable to sync billing state from Stripe." };
+    return {
+      success: false,
+      error: "Unable to sync billing state from Stripe.",
+    };
   }
 }
 
@@ -372,7 +401,12 @@ async function syncFromStripe({ actor = null } = {}) {
  * Lists recent invoices for the billing page. Read-only, hosted links only.
  */
 async function listInvoices({ limit = 12 } = {}) {
-  if (!isConfigured()) return { success: false, error: "Billing is not configured.", invoices: [] };
+  if (!isConfigured())
+    return {
+      success: false,
+      error: "Billing is not configured.",
+      invoices: [],
+    };
   const stripe = client();
 
   const record = await Billing.get();
@@ -393,7 +427,9 @@ async function listInvoices({ limit = 12 } = {}) {
         amountDue: invoice.amount_due,
         amountPaid: invoice.amount_paid,
         currency: invoice.currency?.toUpperCase() ?? "USD",
-        created: invoice.created ? new Date(invoice.created * 1000).toISOString() : null,
+        created: invoice.created
+          ? new Date(invoice.created * 1000).toISOString()
+          : null,
         periodEnd: invoice.period_end
           ? new Date(invoice.period_end * 1000).toISOString()
           : null,
@@ -440,7 +476,10 @@ async function cancelSubscription({ immediately = false, actor = null } = {}) {
       metadata: { immediately },
     });
 
-    return { success: true, status: Billing.mapStripeStatus(subscription.status) };
+    return {
+      success: true,
+      status: Billing.mapStripeStatus(subscription.status),
+    };
   } catch (error) {
     console.error("[Billing] cancellation failed:", error.message);
     return { success: false, error: "Unable to cancel the subscription." };

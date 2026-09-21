@@ -24,7 +24,12 @@ const REASONS = Object.freeze({
   ESCALATED: "escalated",
 });
 
-const STATUSES = Object.freeze(["open", "in_progress", "resolved", "dismissed"]);
+const STATUSES = Object.freeze([
+  "open",
+  "in_progress",
+  "resolved",
+  "dismissed",
+]);
 
 /** Phrases that indicate the model admitted it could not answer. */
 const REFUSAL_PATTERNS = [
@@ -39,14 +44,83 @@ const REFUSAL_PATTERNS = [
 
 /** Very common words that carry no topical signal when grouping questions. */
 const STOP_WORDS = new Set([
-  "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "do",
-  "does", "did", "doing", "have", "has", "had", "i", "you", "we", "they", "it",
-  "he", "she", "me", "my", "your", "our", "their", "of", "to", "in", "on",
-  "for", "with", "at", "by", "from", "about", "as", "into", "and", "or", "but",
-  "if", "then", "than", "so", "can", "could", "will", "would", "should",
-  "there", "here", "what", "whats", "how", "when", "where", "who", "which",
-  "why", "please", "tell", "know", "get", "any", "some", "this", "that",
-  "these", "those", "am", "want", "need", "help",
+  "a",
+  "an",
+  "the",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "do",
+  "does",
+  "did",
+  "doing",
+  "have",
+  "has",
+  "had",
+  "i",
+  "you",
+  "we",
+  "they",
+  "it",
+  "he",
+  "she",
+  "me",
+  "my",
+  "your",
+  "our",
+  "their",
+  "of",
+  "to",
+  "in",
+  "on",
+  "for",
+  "with",
+  "at",
+  "by",
+  "from",
+  "about",
+  "as",
+  "into",
+  "and",
+  "or",
+  "but",
+  "if",
+  "then",
+  "than",
+  "so",
+  "can",
+  "could",
+  "will",
+  "would",
+  "should",
+  "there",
+  "here",
+  "what",
+  "whats",
+  "how",
+  "when",
+  "where",
+  "who",
+  "which",
+  "why",
+  "please",
+  "tell",
+  "know",
+  "get",
+  "any",
+  "some",
+  "this",
+  "that",
+  "these",
+  "those",
+  "am",
+  "want",
+  "need",
+  "help",
 ]);
 
 const MIN_QUESTION_LENGTH = 6;
@@ -78,11 +152,13 @@ function normalizeQuestion(question) {
     else if (stem.length > 4 && stem.endsWith("ed")) stem = stem.slice(0, -2);
 
     // Undo the consonant doubling that those endings introduce.
-    if (stem.length > 3 && /([bdfglmnprt])\1$/.test(stem)) stem = stem.slice(0, -1);
+    if (stem.length > 3 && /([bdfglmnprt])\1$/.test(stem))
+      stem = stem.slice(0, -1);
 
     // Plural endings: "policies" -> "policy", "boxes" -> "box".
     if (stem.length > 4 && stem.endsWith("ies")) return `${stem.slice(0, -3)}y`;
-    if (stem.length > 4 && /(?:ch|sh|ss|x|z)es$/.test(stem)) return stem.slice(0, -2);
+    if (stem.length > 4 && /(?:ch|sh|ss|x|z)es$/.test(stem))
+      return stem.slice(0, -2);
     if (stem.length > 3 && stem.endsWith("s") && !stem.endsWith("ss"))
       return stem.slice(0, -1);
 
@@ -95,7 +171,12 @@ function normalizeQuestion(question) {
 function looksLikeRefusal(text, fallbackMessage = null) {
   const answer = String(text ?? "").trim();
   if (!answer) return true;
-  if (fallbackMessage && answer.toLowerCase().includes(String(fallbackMessage).toLowerCase().slice(0, 40)))
+  if (
+    fallbackMessage &&
+    answer
+      .toLowerCase()
+      .includes(String(fallbackMessage).toLowerCase().slice(0, 40))
+  )
     return true;
   return REFUSAL_PATTERNS.some((pattern) => pattern.test(answer));
 }
@@ -112,7 +193,9 @@ function evaluate(exchange = {}) {
   // Ignore greetings and other non-questions - they are not knowledge gaps.
   if (question.length < MIN_QUESTION_LENGTH) return { isGap: false, reasons };
 
-  const sourceCount = Array.isArray(exchange.sources) ? exchange.sources.length : 0;
+  const sourceCount = Array.isArray(exchange.sources)
+    ? exchange.sources.length
+    : 0;
   const refused = looksLikeRefusal(exchange.answer, exchange.fallbackMessage);
 
   if (refused) reasons.push(REASONS.REFUSAL);
@@ -132,42 +215,60 @@ async function record(exchange = {}) {
     const { isGap, reasons } = evaluate(exchange);
     if (!isGap) return null;
 
-    const question = String(exchange.question).trim().slice(0, MAX_QUESTION_LENGTH);
+    const question = String(exchange.question)
+      .trim()
+      .slice(0, MAX_QUESTION_LENGTH);
     const normalized = normalizeQuestion(question);
     // A question made entirely of stop words carries no topic to group on.
     if (!normalized) return null;
 
-    const existing = await prisma.knowledge_gaps.findUnique({ where: { normalized } });
-
-    if (existing) {
+    // Two visitors can ask the same unanswerable question at the same moment.
+    // A find-then-create would let one of them lose to the unique index and be
+    // dropped, under-counting exactly the questions that matter most, so the
+    // create path catches the constraint violation and folds into an update.
+    const bumpExisting = async (existing) => {
       const merged = [
         ...new Set([...JSON.parse(existing.reasons || "[]"), ...reasons]),
       ];
-      return await prisma.knowledge_gaps.update({
+      return prisma.knowledge_gaps.update({
         where: { normalized },
         data: {
           frequency: { increment: 1 },
           reasons: JSON.stringify(merged),
           lastSeenAt: new Date(),
-          // A gap that was marked resolved but is still being asked reopens.
+          // A gap marked resolved but still being asked reopens itself.
           ...(existing.status === "resolved" ? { status: "open" } : {}),
         },
       });
-    }
+    };
 
-    return await prisma.knowledge_gaps.create({
-      data: {
-        normalized,
-        question,
-        frequency: 1,
-        reasons: JSON.stringify(reasons),
-        agent_profile_id: exchange.agentProfileId ?? null,
-        workspace_id: exchange.workspaceId ?? null,
-        embed_id: exchange.embedId ?? null,
-        status: "open",
-        suggested_action: suggestAction(reasons),
-      },
+    const existing = await prisma.knowledge_gaps.findUnique({
+      where: { normalized },
     });
+    if (existing) return await bumpExisting(existing);
+
+    try {
+      return await prisma.knowledge_gaps.create({
+        data: {
+          normalized,
+          question,
+          frequency: 1,
+          reasons: JSON.stringify(reasons),
+          agent_profile_id: exchange.agentProfileId ?? null,
+          workspace_id: exchange.workspaceId ?? null,
+          embed_id: exchange.embedId ?? null,
+          status: "open",
+          suggested_action: suggestAction(reasons),
+        },
+      });
+    } catch (error) {
+      // P2002 == another request created this same gap first.
+      if (error?.code !== "P2002") throw error;
+      const raced = await prisma.knowledge_gaps.findUnique({
+        where: { normalized },
+      });
+      return raced ? await bumpExisting(raced) : null;
+    }
   } catch (error) {
     // Detection must never break a chat response.
     console.error("[KnowledgeGaps] record failed:", error.message);

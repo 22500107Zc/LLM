@@ -59,9 +59,10 @@ const Lead = {
    * @param {{requiredFields?: string[], actor?: object|null}} options
    */
   create: async function (payload = {}, options = {}) {
-    const required = Array.isArray(options.requiredFields) && options.requiredFields.length
-      ? options.requiredFields.filter((f) => CONFIGURABLE_FIELDS.includes(f))
-      : [...DEFAULT_REQUIRED_FIELDS];
+    const required =
+      Array.isArray(options.requiredFields) && options.requiredFields.length
+        ? options.requiredFields.filter((f) => CONFIGURABLE_FIELDS.includes(f))
+        : [...DEFAULT_REQUIRED_FIELDS];
 
     const data = {
       first_name: clean(payload.firstName ?? payload.first_name, 120),
@@ -81,7 +82,10 @@ const Lead = {
 
     const missing = required.filter((field) => !data[field]);
     if (missing.length)
-      return { lead: null, error: `Missing required field(s): ${missing.join(", ")}.` };
+      return {
+        lead: null,
+        error: `Missing required field(s): ${missing.join(", ")}.`,
+      };
 
     if (data.email && !validEmail(data.email))
       return { lead: null, error: "A valid email address is required." };
@@ -157,7 +161,9 @@ const Lead = {
     if (!STATUSES.includes(String(status)))
       return { success: false, error: "Unknown lead status." };
     try {
-      const existing = await prisma.leads.findUnique({ where: { uuid: String(uuid) } });
+      const existing = await prisma.leads.findUnique({
+        where: { uuid: String(uuid) },
+      });
       if (!existing) return { success: false, error: "Lead not found." };
 
       const lead = await prisma.leads.update({
@@ -182,7 +188,9 @@ const Lead = {
 
   addNote: async function ({ uuid, note, actor = null }) {
     try {
-      const existing = await prisma.leads.findUnique({ where: { uuid: String(uuid) } });
+      const existing = await prisma.leads.findUnique({
+        where: { uuid: String(uuid) },
+      });
       if (!existing) return { success: false, error: "Lead not found." };
 
       const stamp = new Date().toISOString();
@@ -213,7 +221,10 @@ const Lead = {
     try {
       await prisma.leads.update({
         where: { id: Number(id) },
-        data: { delivered: !error, delivery_error: error ? String(error).slice(0, 500) : null },
+        data: {
+          delivered: !error,
+          delivery_error: error ? String(error).slice(0, 500) : null,
+        },
       });
     } catch (e) {
       console.error("[Lead] delivery flag failed:", e.message);

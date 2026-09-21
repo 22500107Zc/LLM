@@ -10,7 +10,12 @@ const { AuditLog } = require("./audit");
  * business's existing tools over email, webhook or Slack.
  */
 
-const STATUSES = Object.freeze(["open", "acknowledged", "resolved", "dismissed"]);
+const STATUSES = Object.freeze([
+  "open",
+  "acknowledged",
+  "resolved",
+  "dismissed",
+]);
 const REASONS = Object.freeze([
   "requested", // the visitor asked for a person
   "no_answer", // the AI could not answer from approved knowledge
@@ -29,7 +34,8 @@ function clean(value, max = 255) {
 /** Renders a transcript array into a stable, readable text block. */
 function renderTranscript(transcript) {
   if (!transcript) return null;
-  if (typeof transcript === "string") return transcript.slice(0, MAX_TRANSCRIPT_CHARS);
+  if (typeof transcript === "string")
+    return transcript.slice(0, MAX_TRANSCRIPT_CHARS);
   if (!Array.isArray(transcript)) return null;
 
   return transcript
@@ -58,9 +64,14 @@ const Escalation = {
           uuid: uuidv4(),
           contact_name: clean(payload.contactName ?? payload.contact_name, 200),
           contact_email:
-            clean(payload.contactEmail ?? payload.contact_email, 255)?.toLowerCase() ??
-            null,
-          contact_phone: clean(payload.contactPhone ?? payload.contact_phone, 60),
+            clean(
+              payload.contactEmail ?? payload.contact_email,
+              255
+            )?.toLowerCase() ?? null,
+          contact_phone: clean(
+            payload.contactPhone ?? payload.contact_phone,
+            60
+          ),
           question: clean(payload.question, 4_000),
           transcript: renderTranscript(payload.transcript),
           summary: clean(payload.summary, 4_000),

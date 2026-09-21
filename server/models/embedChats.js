@@ -30,6 +30,20 @@ const EmbedChats = {
           session_id: String(sessionId),
         },
       });
+
+      // Commercial platform: watch for questions the approved knowledge could
+      // not answer. Fire-and-forget - it can never delay or fail a reply.
+      try {
+        require("../business/services/knowledgeGaps").KnowledgeGaps.observe({
+          question: prompt,
+          answer: response?.text ?? "",
+          sources: response?.sources ?? [],
+          embedId: Number(embedId),
+        });
+      } catch {
+        /* the commercial layer is optional; never break upstream chat */
+      }
+
       return { chat, message: null };
     } catch (error) {
       console.error(error.message);

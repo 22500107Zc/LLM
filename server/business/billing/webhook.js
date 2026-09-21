@@ -79,7 +79,10 @@ async function releaseEvent(eventId) {
   try {
     await prisma.billing_events.delete({ where: { stripe_event_id: eventId } });
   } catch (error) {
-    console.error("[Billing webhook] could not release event claim:", error.message);
+    console.error(
+      "[Billing webhook] could not release event claim:",
+      error.message
+    );
   }
 }
 
@@ -119,7 +122,10 @@ async function retrieveSubscription(subscriptionId) {
       expand: ["items.data.price"],
     });
   } catch (error) {
-    console.error("[Billing webhook] subscription fetch failed:", error.message);
+    console.error(
+      "[Billing webhook] subscription fetch failed:",
+      error.message
+    );
     return null;
   }
 }
@@ -130,7 +136,8 @@ async function applyEvent(event) {
 
   switch (event.type) {
     case "checkout.session.completed": {
-      if (object.mode !== "subscription") return "ignored: non-subscription checkout";
+      if (object.mode !== "subscription")
+        return "ignored: non-subscription checkout";
       const customerId = customerIdFrom(object);
       if (customerId)
         await Billing.update(
@@ -277,7 +284,10 @@ async function handleStripeWebhook(request, response) {
       config.stripe.webhookSecret
     );
   } catch (error) {
-    console.warn("[Billing webhook] signature verification failed:", error.message);
+    console.warn(
+      "[Billing webhook] signature verification failed:",
+      error.message
+    );
     return response.status(400).json({ received: false });
   }
 
@@ -316,7 +326,10 @@ async function handleStripeWebhook(request, response) {
     console.log(`[Billing webhook] ${event.type} -> ${summary}`);
     return response.status(200).json({ received: true });
   } catch (error) {
-    console.error(`[Billing webhook] failed to apply ${event.type}:`, error.message);
+    console.error(
+      `[Billing webhook] failed to apply ${event.type}:`,
+      error.message
+    );
     // Release the claim so Stripe's retry is actually processed rather than
     // being swallowed as a duplicate.
     await releaseEvent(event.id);

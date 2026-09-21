@@ -30,7 +30,8 @@ function isBlockedAddress(address) {
 
   if (net.isIPv4(address)) {
     const octets = address.split(".").map(Number);
-    if (octets.length !== 4 || octets.some((o) => !Number.isInteger(o))) return true;
+    if (octets.length !== 4 || octets.some((o) => !Number.isInteger(o)))
+      return true;
     const [a, b] = octets;
     if (a === 0) return true; // "this" network
     if (a === 10) return true; // RFC1918
@@ -76,7 +77,10 @@ async function assertSafeDestination(rawUrl) {
   if (!ALLOWED_PROTOCOLS.has(url.protocol))
     return { ok: false, reason: "Only http(s) destinations are permitted." };
 
-  if (config.deployment.environment === "production" && url.protocol === "http:")
+  if (
+    config.deployment.environment === "production" &&
+    url.protocol === "http:"
+  )
     return { ok: false, reason: "Webhook destinations must use HTTPS." };
 
   const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
@@ -91,7 +95,10 @@ async function assertSafeDestination(rawUrl) {
   // A literal IP needs no DNS round trip.
   if (net.isIP(hostname)) {
     if (isBlockedAddress(hostname))
-      return { ok: false, reason: "Destination resolves to a restricted network." };
+      return {
+        ok: false,
+        reason: "Destination resolves to a restricted network.",
+      };
     return { ok: true, url, addresses: [hostname] };
   }
 
@@ -107,7 +114,10 @@ async function assertSafeDestination(rawUrl) {
 
   for (const record of records) {
     if (isBlockedAddress(record.address))
-      return { ok: false, reason: "Destination resolves to a restricted network." };
+      return {
+        ok: false,
+        reason: "Destination resolves to a restricted network.",
+      };
   }
 
   return { ok: true, url, addresses: records.map((r) => r.address) };
@@ -162,7 +172,9 @@ async function postJSON(rawUrl, payload, options = {}) {
       ok: response.ok,
       status: response.status,
       body,
-      error: response.ok ? null : `Destination responded with ${response.status}.`,
+      error: response.ok
+        ? null
+        : `Destination responded with ${response.status}.`,
     };
   } catch (error) {
     const aborted = error?.name === "AbortError";

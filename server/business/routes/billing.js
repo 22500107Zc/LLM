@@ -18,7 +18,8 @@ function absoluteUrl(request, fallbackPath) {
   const configured = config.deployment.publicUrl;
   if (configured) return `${configured.replace(/\/$/, "")}${fallbackPath}`;
   // Trust the proxy headers a production reverse proxy sets.
-  const proto = request.headers["x-forwarded-proto"] ?? request.protocol ?? "https";
+  const proto =
+    request.headers["x-forwarded-proto"] ?? request.protocol ?? "https";
   const host = request.headers["x-forwarded-host"] ?? request.get("host");
   return `${proto}://${host}${fallbackPath}`;
 }
@@ -82,9 +83,10 @@ function billingRoutes(router) {
     safeHandler(async (request, response) => {
       const { email = null, name = null, daysUntilDue = 30 } = reqBody(request);
       if (!email)
-        return response
-          .status(400)
-          .json({ success: false, error: "A billing email address is required." });
+        return response.status(400).json({
+          success: false,
+          error: "A billing email address is required.",
+        });
 
       const result = await service.createInvoicedSubscription({
         email,
@@ -115,7 +117,9 @@ function billingRoutes(router) {
     "/billing/sync",
     [requireCapability("billing:manage")],
     safeHandler(async (_request, response) => {
-      const result = await service.syncFromStripe({ actor: response.locals.user });
+      const result = await service.syncFromStripe({
+        actor: response.locals.user,
+      });
       invalidateAccessCache();
       response.status(result.success ? 200 : 400).json(result);
     })
@@ -140,7 +144,9 @@ function billingRoutes(router) {
     "/billing/resume",
     [requireCapability("billing:manage")],
     safeHandler(async (_request, response) => {
-      const result = await service.resumeSubscription({ actor: response.locals.user });
+      const result = await service.resumeSubscription({
+        actor: response.locals.user,
+      });
       invalidateAccessCache();
       response.status(result.success ? 200 : 400).json(result);
     })
@@ -165,9 +171,10 @@ function billingRoutes(router) {
       // Shape-check the identifiers so a typo cannot bind the deployment to
       // something nonsensical before we call Stripe.
       if (customerId && !/^cus_[A-Za-z0-9]+$/.test(String(customerId)))
-        return response
-          .status(400)
-          .json({ success: false, error: "That does not look like a Stripe customer ID." });
+        return response.status(400).json({
+          success: false,
+          error: "That does not look like a Stripe customer ID.",
+        });
       if (subscriptionId && !/^sub_[A-Za-z0-9]+$/.test(String(subscriptionId)))
         return response.status(400).json({
           success: false,
@@ -177,7 +184,9 @@ function billingRoutes(router) {
       await Billing.update(
         {
           ...(customerId ? { stripe_customer_id: String(customerId) } : {}),
-          ...(subscriptionId ? { stripe_subscription_id: String(subscriptionId) } : {}),
+          ...(subscriptionId
+            ? { stripe_subscription_id: String(subscriptionId) }
+            : {}),
         },
         { reason: "operator.association", actor: response.locals.user }
       );
@@ -189,7 +198,9 @@ function billingRoutes(router) {
         resourceId: subscriptionId ?? customerId,
       });
 
-      const result = await service.syncFromStripe({ actor: response.locals.user });
+      const result = await service.syncFromStripe({
+        actor: response.locals.user,
+      });
       invalidateAccessCache();
       response.status(200).json({ success: true, sync: result });
     })

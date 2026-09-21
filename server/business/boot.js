@@ -64,9 +64,13 @@ function evaluatePosture(env = process.env) {
         "JWT_SECRET is missing or too weak. Generate at least 32 random characters."
       );
     if (isWeakSecret(env.SIG_KEY))
-      errors.push("SIG_KEY is missing or too weak. Generate a strong random value.");
+      errors.push(
+        "SIG_KEY is missing or too weak. Generate a strong random value."
+      );
     if (isWeakSecret(env.SIG_SALT))
-      errors.push("SIG_SALT is missing or too weak. Generate a strong random value.");
+      errors.push(
+        "SIG_SALT is missing or too weak. Generate a strong random value."
+      );
   }
 
   // --- Public embed exposure ------------------------------------------------

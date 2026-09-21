@@ -37,8 +37,12 @@ function teamRoutes(router) {
     [requireCapability("team:manage")],
     safeHandler(async (request, response) => {
       const { User } = require("../../models/user");
-      const { username, password, role = Team.BUSINESS_ROLES.MEMBER, title = null } =
-        reqBody(request);
+      const {
+        username,
+        password,
+        role = Team.BUSINESS_ROLES.MEMBER,
+        title = null,
+      } = reqBody(request);
 
       if (!username || !password)
         return response
@@ -121,7 +125,8 @@ function teamRoutes(router) {
       const userId = Number(request.params.id);
 
       const target = await User.get({ id: userId });
-      if (!target) return response.status(404).json({ error: "User not found." });
+      if (!target)
+        return response.status(404).json({ error: "User not found." });
 
       const targetRole = await Team.roleFor(target);
       if (targetRole === Team.BUSINESS_ROLES.OWNER)
@@ -150,7 +155,8 @@ function teamRoutes(router) {
       const userId = Number(request.params.id);
 
       const target = await User.get({ id: userId });
-      if (!target) return response.status(404).json({ error: "User not found." });
+      if (!target)
+        return response.status(404).json({ error: "User not found." });
       if (target.id === response.locals.user?.id)
         return response
           .status(400)
@@ -237,7 +243,11 @@ function teamRoutes(router) {
       });
 
       response.status(200).json({
-        apiKey: { id: apiKey.id, name: apiKey.name ?? null, secret: apiKey.secret },
+        apiKey: {
+          id: apiKey.id,
+          name: apiKey.name ?? null,
+          secret: apiKey.secret,
+        },
         warning:
           "Copy this key now. For your security it will not be shown again.",
       });

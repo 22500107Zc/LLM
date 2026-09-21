@@ -103,7 +103,10 @@ const Analytics = {
       }),
       prisma.leads.count({ where: { createdAt: range } }),
       prisma.leads.count({
-        where: { createdAt: range, status: { in: ["qualified", "opportunity", "closed"] } },
+        where: {
+          createdAt: range,
+          status: { in: ["qualified", "opportunity", "closed"] },
+        },
       }),
       prisma.escalations.count({ where: { createdAt: range } }),
       prisma.knowledge_gaps.count({ where: { status: "open" } }),
@@ -112,7 +115,13 @@ const Analytics = {
         where: { startedAt: range, status: { in: ["failed", "timed_out"] } },
       }),
       prisma.agent_profiles.findMany({
-        select: { id: true, uuid: true, name: true, workspace_id: true, visibility: true },
+        select: {
+          id: true,
+          uuid: true,
+          name: true,
+          workspace_id: true,
+          visibility: true,
+        },
       }),
     ]);
 
@@ -121,7 +130,9 @@ const Analytics = {
     // for internal chats; message counts are the raw exchanges.
     const publicSessions = new Set(publicChats.map((chat) => chat.session_id));
     const internalConversations = new Set(
-      internalChats.map((chat) => `${chat.workspaceId}:${chat.user_id ?? "system"}`)
+      internalChats.map(
+        (chat) => `${chat.workspaceId}:${chat.user_id ?? "system"}`
+      )
     );
 
     const aiMessages = internalChats.length + publicChats.length;
@@ -149,8 +160,12 @@ const Analytics = {
     publicChats.forEach(inspect);
 
     // --- feedback ------------------------------------------------------------
-    const positiveFeedback = internalChats.filter((c) => c.feedbackScore === true).length;
-    const negativeFeedback = internalChats.filter((c) => c.feedbackScore === false).length;
+    const positiveFeedback = internalChats.filter(
+      (c) => c.feedbackScore === true
+    ).length;
+    const negativeFeedback = internalChats.filter(
+      (c) => c.feedbackScore === false
+    ).length;
 
     // --- per-agent usage -----------------------------------------------------
     const workspaceToAgent = new Map(
@@ -159,7 +174,9 @@ const Analytics = {
     const embedConfigs = await prisma.embed_configs.findMany({
       select: { id: true, workspace_id: true },
     });
-    const embedToWorkspace = new Map(embedConfigs.map((e) => [e.id, e.workspace_id]));
+    const embedToWorkspace = new Map(
+      embedConfigs.map((e) => [e.id, e.workspace_id])
+    );
 
     const agentUsage = new Map();
     const bump = (workspaceId, key) => {
@@ -203,7 +220,11 @@ const Analytics = {
       .slice(0, 15);
 
     return {
-      window: { days: windowDays, since: since.toISOString(), until: now.toISOString() },
+      window: {
+        days: windowDays,
+        since: since.toISOString(),
+        until: now.toISOString(),
+      },
 
       conversations: {
         total: internalConversations.size + publicSessions.size,

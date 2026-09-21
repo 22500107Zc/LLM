@@ -41,6 +41,27 @@ process.on("message", async (payload) => {
       return;
     }
 
+    // Commercial platform: a restricted (unpaid, past grace period)
+    // deployment stops running billable automations. The run is recorded as
+    // failed with a clear reason so the failure is visible in the UI rather
+    // than the job silently never happening.
+    try {
+      const {
+        automationsPermitted,
+      } = require("../business/middleware/billingGate.js");
+      if (!(await automationsPermitted())) {
+        log(
+          `Scheduled job "${job.name}" (id=${job.id}) skipped - AI usage is suspended for this deployment.`
+        );
+        status = "failed";
+        errorMessage =
+          "Skipped: AI usage is suspended for this deployment. Resolve billing to resume automations.";
+        return;
+      }
+    } catch {
+      /* the commercial layer is optional; never block upstream automations */
+    }
+
     // Transition queued -> running. If this returns false, the row was
     // already moved to a terminal state (e.g. parent failed it because it
     // thought the worker had died). Bail out without touching it further.

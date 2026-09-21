@@ -45,7 +45,8 @@ const ROLE_DESCRIPTIONS = Object.freeze({
   [BUSINESS_ROLES.MANAGER]:
     "Operational content: agents, conversations, analytics and limited settings.",
   [BUSINESS_ROLES.MEMBER]: "Can use the AI capabilities assigned to them.",
-  [BUSINESS_ROLES.VIEWER]: "Read-only access to what has been shared with them.",
+  [BUSINESS_ROLES.VIEWER]:
+    "Read-only access to what has been shared with them.",
 });
 
 /**
@@ -241,7 +242,10 @@ const Team = {
 
       await prisma.platform_user_profiles.upsert({
         where: { user_id: firstAdmin.id },
-        update: { business_role: BUSINESS_ROLES.OWNER, lastUpdatedAt: new Date() },
+        update: {
+          business_role: BUSINESS_ROLES.OWNER,
+          lastUpdatedAt: new Date(),
+        },
         create: { user_id: firstAdmin.id, business_role: BUSINESS_ROLES.OWNER },
       });
 
@@ -314,7 +318,8 @@ const Team = {
 
       // Keep the upstream role in lockstep so upstream permission checks agree.
       const upstream = this.upstreamRoleFor(role);
-      if (user.role !== upstream) await User.update(Number(userId), { role: upstream });
+      if (user.role !== upstream)
+        await User.update(Number(userId), { role: upstream });
 
       await AuditLog.log({
         action: "team.role_changed",
@@ -322,7 +327,12 @@ const Team = {
         actor,
         resource: "user",
         resourceId: userId,
-        metadata: { username: user.username, from: previous, to: role, upstream },
+        metadata: {
+          username: user.username,
+          from: previous,
+          to: role,
+          upstream,
+        },
       });
 
       return { success: true, role };

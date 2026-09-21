@@ -10,9 +10,15 @@ function leadRoutes(router) {
     "/leads",
     [requireCapability("leads:view")],
     safeHandler(async (request, response) => {
-      const { status = null, limit = 100, offset = 0, search = null } = request.query;
+      const {
+        status = null,
+        limit = 100,
+        offset = 0,
+        search = null,
+      } = request.query;
       const clause = {};
-      if (status && Lead.STATUSES.includes(String(status))) clause.status = String(status);
+      if (status && Lead.STATUSES.includes(String(status)))
+        clause.status = String(status);
       if (search) {
         const term = String(search);
         clause.OR = [
@@ -47,7 +53,9 @@ function leadRoutes(router) {
     safeHandler(async (request, response) => {
       const { status = null } = request.query;
       const clause =
-        status && Lead.STATUSES.includes(String(status)) ? { status: String(status) } : {};
+        status && Lead.STATUSES.includes(String(status))
+          ? { status: String(status) }
+          : {};
       const leads = await Lead.where(clause, 500, 0);
 
       response.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -79,7 +87,9 @@ function leadRoutes(router) {
     safeHandler(async (request, response) => {
       const { note } = reqBody(request);
       if (!note || !String(note).trim())
-        return response.status(400).json({ success: false, error: "A note is required." });
+        return response
+          .status(400)
+          .json({ success: false, error: "A note is required." });
 
       const result = await Lead.addNote({
         uuid: String(request.params.uuid),
@@ -100,7 +110,9 @@ function leadRoutes(router) {
 
       const result = await dispatch("lead.created", lead);
       await Lead.markDelivered(lead.id, {
-        error: result.delivered ? null : "No integration accepted the delivery.",
+        error: result.delivered
+          ? null
+          : "No integration accepted the delivery.",
       });
       response.status(200).json({ success: true, delivery: result });
     })
@@ -153,11 +165,14 @@ function leadRoutes(router) {
       const escalation = await prisma.escalations.findUnique({
         where: { uuid: String(request.params.uuid) },
       });
-      if (!escalation) return response.status(404).json({ error: "Escalation not found." });
+      if (!escalation)
+        return response.status(404).json({ error: "Escalation not found." });
 
       const result = await dispatch("escalation.created", escalation);
       await Escalation.markDelivered(escalation.id, {
-        error: result.delivered ? null : "No integration accepted the delivery.",
+        error: result.delivered
+          ? null
+          : "No integration accepted the delivery.",
       });
       response.status(200).json({ success: true, delivery: result });
     })

@@ -198,7 +198,9 @@ function publicCaptureRoutes(app) {
         where: { session_id: String(body.sessionId), status: "open" },
       });
       if (existing)
-        return response.status(200).json({ success: true, alreadyEscalated: true });
+        return response
+          .status(200)
+          .json({ success: true, alreadyEscalated: true });
 
       const transcript = await transcriptFor(embed.id, String(body.sessionId));
 
@@ -206,7 +208,8 @@ function publicCaptureRoutes(app) {
         contactName: body.name ?? body.contactName,
         contactEmail: body.email ?? body.contactEmail,
         contactPhone: body.phone ?? body.contactPhone,
-        question: body.question ?? transcript.find((t) => t.role === "user")?.content,
+        question:
+          body.question ?? transcript.find((t) => t.role === "user")?.content,
         transcript,
         summary: transcript.length
           ? `Visitor requested a human after ${Math.ceil(transcript.length / 2)} exchange(s).`

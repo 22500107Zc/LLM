@@ -32,7 +32,8 @@ function integrationRoutes(router) {
         enabled: body.enabled !== false,
         actor: response.locals.user,
       });
-      if (!result.integration) return response.status(400).json({ error: result.error });
+      if (!result.integration)
+        return response.status(400).json({ error: result.error });
       response.status(200).json({ integration: result.integration });
     })
   );
@@ -87,7 +88,9 @@ function integrationRoutes(router) {
     "/integrations/:uuid/deliveries",
     [requireCapability("integrations:view")],
     safeHandler(async (request, response) => {
-      const integration = await Integration.get({ uuid: String(request.params.uuid) });
+      const integration = await Integration.get({
+        uuid: String(request.params.uuid),
+      });
       if (!integration)
         return response.status(404).json({ error: "Integration not found." });
       response

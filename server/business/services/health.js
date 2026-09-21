@@ -14,13 +14,15 @@ const config = require("../config");
  * in either payload.
  */
 
-const STATUS = Object.freeze({ OK: "ok", DEGRADED: "degraded", DOWN: "down", UNKNOWN: "unknown" });
+const STATUS = Object.freeze({
+  OK: "ok",
+  DEGRADED: "degraded",
+  DOWN: "down",
+  UNKNOWN: "unknown",
+});
 
 function storageRoot() {
-  return (
-    process.env.STORAGE_DIR ??
-    path.resolve(__dirname, "../../storage")
-  );
+  return process.env.STORAGE_DIR ?? path.resolve(__dirname, "../../storage");
 }
 
 /** Recursively measures a directory, capped so a huge tree cannot stall boot. */
@@ -74,7 +76,7 @@ async function vectorStatus() {
       provider: process.env.VECTOR_DB ?? "lancedb",
       heartbeat: heartbeat?.heartbeat ?? null,
     };
-  } catch (error) {
+  } catch {
     return {
       status: STATUS.DEGRADED,
       provider: process.env.VECTOR_DB ?? "lancedb",
@@ -93,7 +95,10 @@ async function collectorStatus() {
       detail: online ? null : "The document processor is not reachable.",
     };
   } catch {
-    return { status: STATUS.UNKNOWN, detail: "Document processor status unavailable." };
+    return {
+      status: STATUS.UNKNOWN,
+      detail: "Document processor status unavailable.",
+    };
   }
 }
 
@@ -168,7 +173,9 @@ const Health = {
 
       const usedBytes = documentsBytes + vectorBytes + databaseBytes;
       const limitBytes = config.limits.storageLimitGb * 1024 ** 3;
-      const percentUsed = limitBytes ? Math.round((usedBytes / limitBytes) * 1000) / 10 : 0;
+      const percentUsed = limitBytes
+        ? Math.round((usedBytes / limitBytes) * 1000) / 10
+        : 0;
 
       storage = {
         status:
@@ -210,10 +217,14 @@ const Health = {
       ]);
 
     const { PlatformSettings } = require("../models/platformSettings");
-    const lastBackupAt = await PlatformSettings.get(PlatformSettings.KEYS.LAST_BACKUP_AT);
+    const lastBackupAt = await PlatformSettings.get(
+      PlatformSettings.KEYS.LAST_BACKUP_AT
+    );
 
     const components = { database, vector, collector, llm, storage };
-    const worst = Object.values(components).some((c) => c.status === STATUS.DOWN)
+    const worst = Object.values(components).some(
+      (c) => c.status === STATUS.DOWN
+    )
       ? STATUS.DOWN
       : Object.values(components).some((c) => c.status === STATUS.DEGRADED)
         ? STATUS.DEGRADED
