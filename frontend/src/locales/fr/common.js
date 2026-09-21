@@ -69,7 +69,7 @@ const TRANSLATIONS = {
     refresh: "Rafraîchir",
   },
   settings: {
-    title: "Paramètres de l'instance",
+    title: "{{appName}}",
     invites: "Invitation",
     users: "Utilisateurs",
     workspaces: "Espaces de travail",

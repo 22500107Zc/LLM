@@ -68,7 +68,7 @@ const TRANSLATIONS = {
     refresh: "استعيد/جدد",
   },
   settings: {
-    title: "إعدادات المثيل",
+    title: "{{appName}}",
     invites: "دعوات",
     users: "مستعملون",
     workspaces: "مساحات العمل",

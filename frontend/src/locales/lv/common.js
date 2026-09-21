@@ -69,7 +69,7 @@ const TRANSLATIONS = {
     refresh: "Atjaunot",
   },
   settings: {
-    title: "Instances iestatījumi",
+    title: "{{appName}}",
     invites: "Ielūgumi",
     users: "Lietotāji",
     workspaces: "Darba telpas",

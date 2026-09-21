@@ -71,7 +71,7 @@ const TRANSLATIONS = {
     refresh: "تازه‌سازی کردن",
   },
   settings: {
-    title: "تنظیمات سامانه",
+    title: "{{appName}}",
     invites: "دعوت‌نامه‌ها",
     users: "کاربران",
     workspaces: "فضاهای کاری",

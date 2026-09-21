@@ -70,7 +70,7 @@ const TRANSLATIONS = {
     refresh: "Tazelemek",
   },
   settings: {
-    title: "Instance Ayarları",
+    title: "{{appName}}",
     invites: "Davetler",
     users: "Kullanıcılar",
     workspaces: "Çalışma Alanları",

@@ -70,7 +70,7 @@ const TRANSLATIONS = {
     refresh: "Opfrisk",
   },
   settings: {
-    title: "Instansindstillinger",
+    title: "{{appName}}",
     invites: "Invitationer",
     users: "Brugere",
     workspaces: "Arbejdsområder",

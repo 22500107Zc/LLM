@@ -30,3 +30,6 @@ scripts/fixtures/
 .stripe/
 stripe-cli-*
 *.stripe-events.json
+
+# Built frontend copied in for local serving; the image builds its own.
+server/public/

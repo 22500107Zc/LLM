@@ -32,6 +32,7 @@ err()  { printf '\033[31m[acceptance]\033[0m %s\n' "$*" | tee -a "$RESULTS_DIR/r
 SERVER_PID=""
 COLLECTOR_PID=""
 COMPOSE_PROJECT=""
+COPIED_FRONTEND=0
 
 teardown() {
   local code=$?
@@ -53,6 +54,8 @@ teardown() {
   fi
   # The temporary storage holds only generated fixtures and throwaway secrets.
   rm -rf "$WORK_DIR"
+  # A frontend copied in only so a browser could load the pages.
+  [ "$COPIED_FRONTEND" = "1" ] && rm -rf "$ROOT/server/public"
   log "Done. Logs: $RESULTS_DIR"
   exit $code
 }
@@ -268,6 +271,96 @@ else
   echo "BLOCKED: PROVIDER CREDENTIAL REQUIRED" > "$RESULTS_DIR/provider.log"
 fi
 
+# --- desktop and mobile visual check ----------------------------------------
+# Off by default: it needs a built frontend and a browser. VISUAL=1 turns it on.
+if [ "${VISUAL:-0}" = "1" ]; then
+  if [ ! -f "$ROOT/frontend/dist/index.js" ]; then
+    warn "No built frontend at frontend/dist — run 'yarn build' in frontend/ first."
+    echo "BLOCKED: FRONTEND BUILD REQUIRED" > "$RESULTS_DIR/visual.log"
+  elif [ ! -e "${CHROMIUM_PATH:-/opt/pw-browsers/chromium}" ]; then
+    warn "No Chromium available — skipping the visual check."
+    echo "BLOCKED: BROWSER REQUIRED" > "$RESULTS_DIR/visual.log"
+  else
+    log "Serving the built frontend and running the visual check…"
+    mkdir -p "$ROOT/server/public"
+    cp -R "$ROOT/frontend/dist/." "$ROOT/server/public/"
+    COPIED_FRONTEND=1
+    BASE_URL="$BASE_URL" SEED_USERNAME="$SEED_USER" SEED_PASSWORD="$SEED_PASSWORD" \
+    OUT_DIR="$RESULTS_DIR/screenshots" \
+      node "$ROOT/scripts/visual-check.cjs" 2>&1 | tee "$RESULTS_DIR/visual.log"
+    [ "${PIPESTATUS[0]}" -ne 0 ] && OVERALL_FAIL=1
+  fi
+fi
+
+# --- restart persistence ----------------------------------------------------
+# Data written before a restart must still be there after one.
+if [ "$MODE" = "local" ] && [ -n "$SERVER_PID" ]; then
+  log "Checking that data survives a restart…"
+  BEFORE="$(curl -fsS -H "Authorization: Bearer $(curl -fsS -X POST "$BASE_URL/api/request-token" \
+      -H 'Content-Type: application/json' \
+      -d "{\"username\":\"$SEED_USER\",\"password\":\"$SEED_PASSWORD\"}" \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')" \
+    "$BASE_URL/api/workspaces" | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("workspaces",[])))')"
+
+  kill "$SERVER_PID" 2>/dev/null; sleep 2; kill -9 "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null
+  (
+    cd "$ROOT/server"
+    set -a
+    while IFS='=' read -r key value; do
+      case "$key" in ""|\#*) continue ;; esac
+      export "$key=$value"
+    done < "$ENV_FILE"
+    set +a
+    export DATABASE_URL="file:$WORK_DIR/storage/anythingllm.db"
+    exec node index.js
+  ) >> "$RESULTS_DIR/server.log" 2>&1 &
+  SERVER_PID=$!
+  for _ in $(seq 1 90); do curl -fsS "$BASE_URL/api/ping" >/dev/null 2>&1 && break; sleep 1; done
+
+  AFTER="$(curl -fsS -H "Authorization: Bearer $(curl -fsS -X POST "$BASE_URL/api/request-token" \
+      -H 'Content-Type: application/json' \
+      -d "{\"username\":\"$SEED_USER\",\"password\":\"$SEED_PASSWORD\"}" \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')" \
+    "$BASE_URL/api/workspaces" | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("workspaces",[])))')"
+
+  if [ -n "$BEFORE" ] && [ "$BEFORE" = "$AFTER" ]; then
+    log "Restart persistence: $BEFORE agent workspace(s) before and after — OK"
+    echo "PASS restart persistence ($BEFORE workspaces before and after)" > "$RESULTS_DIR/restart.log"
+  else
+    err "Restart persistence FAILED (before=$BEFORE after=$AFTER)"
+    echo "FAIL restart persistence (before=$BEFORE after=$AFTER)" > "$RESULTS_DIR/restart.log"
+    OVERALL_FAIL=1
+  fi
+fi
+
+# --- backup and restore into a clean target ---------------------------------
+log "Backing up and restoring into a clean directory…"
+RESTORE_TARGET="$WORK_DIR/restore-target"
+mkdir -p "$WORK_DIR/backups"
+if STORAGE_DIR="$WORK_DIR/storage" BACKUP_ENV_FILES="$ENV_FILE"      "$ROOT/scripts/backup.sh" "$WORK_DIR/backups" > "$RESULTS_DIR/backup.log" 2>&1; then
+  ARCHIVE="$(ls -t "$WORK_DIR/backups"/*.tar.gz | head -1)"
+  if "$ROOT/scripts/restore.sh" "$ARCHIVE" --target "$RESTORE_TARGET"        >> "$RESULTS_DIR/backup.log" 2>&1; then
+    MISSING=""
+    for expected in anythingllm.db documents lancedb; do
+      [ -e "$RESTORE_TARGET/$expected" ] || MISSING="$MISSING $expected"
+    done
+    if [ -z "$MISSING" ]; then
+      log "Backup and restore into a clean target — OK"
+      echo "PASS backup and restore into a clean target ($ARCHIVE)" >> "$RESULTS_DIR/backup.log"
+    else
+      err "Restored tree is missing:$MISSING"
+      echo "FAIL restored tree is missing:$MISSING" >> "$RESULTS_DIR/backup.log"
+      OVERALL_FAIL=1
+    fi
+  else
+    err "Restore failed. See $RESULTS_DIR/backup.log"
+    OVERALL_FAIL=1
+  fi
+else
+  err "Backup failed. See $RESULTS_DIR/backup.log"
+  OVERALL_FAIL=1
+fi
+
 # --- summary ----------------------------------------------------------------
 {
   echo "# Disposable acceptance run $STAMP"
@@ -280,6 +373,19 @@ fi
   echo
   echo "## Documents"
   grep -E "^DOCUMENT PIPELINE" "$RESULTS_DIR/documents.log" 2>/dev/null | tail -2
+  echo
+  echo "## Restart persistence"
+  cat "$RESULTS_DIR/restart.log" 2>/dev/null || echo "not run"
+  echo
+  echo "## Backup and restore"
+  grep -E "^(PASS|FAIL)" "$RESULTS_DIR/backup.log" 2>/dev/null | tail -2 || echo "not run"
+  echo
+  echo "## Visual check"
+  if [ -f "$RESULTS_DIR/visual.log" ]; then
+    grep -E "^(VISUAL CHECK|BLOCKED)" "$RESULTS_DIR/visual.log" | tail -2
+  else
+    echo "not run (set VISUAL=1)"
+  fi
   echo
   echo "## Provider verification"
   if grep -q "BLOCKED: PROVIDER CREDENTIAL REQUIRED" "$RESULTS_DIR/provider.log" 2>/dev/null; then

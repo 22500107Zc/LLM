@@ -70,7 +70,7 @@ const TRANSLATIONS = {
     refresh: "Tái tạo",
   },
   settings: {
-    title: "Cài đặt hệ thống",
+    title: "{{appName}}",
     invites: "Lời mời",
     users: "Người dùng",
     workspaces: "Không gian làm việc",

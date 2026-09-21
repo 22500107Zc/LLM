@@ -85,7 +85,7 @@ async function validateTablePragmas(force = false) {
 async function setupTelemetry() {
   if (process.env.DISABLE_TELEMETRY === "true") {
     console.log(
-      `\x1b[31m[TELEMETRY DISABLED]\x1b[0m Telemetry is marked as disabled - no events will send. Telemetry helps Mintplex Labs Inc improve the platform.`
+      `\x1b[31m[TELEMETRY DISABLED]\x1b[0m Telemetry is disabled - nothing about this deployment is sent anywhere.`
     );
     return true;
   }
@@ -98,7 +98,7 @@ async function setupTelemetry() {
   }
 
   console.log(
-    `\x1b[32m[TELEMETRY ENABLED]\x1b[0m Anonymous Telemetry enabled. Telemetry helps Mintplex Labs Inc improve the platform.`
+    `\x1b[32m[TELEMETRY ENABLED]\x1b[0m Anonymous Telemetry is enabled. Set DISABLE_TELEMETRY=true to turn it off.`
   );
   await Telemetry.findOrCreateId();
   await Telemetry.sendTelemetry("server_boot", {

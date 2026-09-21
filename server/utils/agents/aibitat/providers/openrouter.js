@@ -8,6 +8,9 @@ const {
   serviceTierParam,
 } = require("./helpers/tooled.js");
 const { RetryError } = require("../error.js");
+const {
+  providerAttributionHeaders,
+} = require("../../../helpers/providerAttribution");
 
 /**
  * The agent provider for the OpenRouter provider.
@@ -26,10 +29,7 @@ class OpenRouterProvider extends InheritMultiple([Provider, UnTooled]) {
     const client = new OpenAI({
       baseURL: "https://openrouter.ai/api/v1",
       apiKey: process.env.OPENROUTER_API_KEY,
-      defaultHeaders: {
-        "HTTP-Referer": "https://anythingllm.com",
-        "X-Title": "the platform",
-      },
+      defaultHeaders: providerAttributionHeaders(),
     });
 
     this._client = client;

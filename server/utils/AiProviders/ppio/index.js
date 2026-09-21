@@ -6,6 +6,9 @@ const fs = require("fs");
 const path = require("path");
 const { safeJsonParse } = require("../../http");
 const {
+  providerAttributionHeaders,
+} = require("../../helpers/providerAttribution");
+const {
   LLMPerformanceMonitor,
 } = require("../../helpers/chat/LLMPerformanceMonitor");
 const cacheFolder = path.resolve(
@@ -25,8 +28,8 @@ class PPIOLLM {
       baseURL: this.basePath,
       apiKey: process.env.PPIO_API_KEY ?? null,
       defaultHeaders: {
-        "HTTP-Referer": "https://anythingllm.com",
-        "X-API-Source": "anythingllm",
+        ...providerAttributionHeaders(),
+        "X-API-Source": "platform",
       },
     });
     this.model =

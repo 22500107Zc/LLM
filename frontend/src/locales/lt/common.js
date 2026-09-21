@@ -76,7 +76,7 @@ const TRANSLATIONS = {
     goToWorkspace: "Eiti į „{{workspace}}“",
   },
   settings: {
-    title: "Sistemos nustatymai",
+    title: "{{appName}}",
     invites: "Pakvietimai",
     users: "Vartotojai",
     workspaces: "Darbo sritys",

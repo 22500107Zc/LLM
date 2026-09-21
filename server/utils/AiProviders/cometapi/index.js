@@ -12,6 +12,9 @@ const {
   LLMPerformanceMonitor,
 } = require("../../helpers/chat/LLMPerformanceMonitor");
 const { COMETAPI_IGNORE_PATTERNS } = require("./constants");
+const {
+  providerAttributionHeaders,
+} = require("../../helpers/providerAttribution");
 const cacheFolder = path.resolve(
   process.env.STORAGE_DIR
     ? path.resolve(process.env.STORAGE_DIR, "models", "cometapi")
@@ -31,8 +34,8 @@ class CometApiLLM {
       baseURL: this.basePath,
       apiKey: process.env.COMETAPI_LLM_API_KEY ?? null,
       defaultHeaders: {
-        "HTTP-Referer": "https://anythingllm.com",
-        "X-CometAPI-Source": "anythingllm",
+        ...providerAttributionHeaders(),
+        "X-CometAPI-Source": "platform",
       },
     });
     this.model =

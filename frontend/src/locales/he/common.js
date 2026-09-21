@@ -67,7 +67,7 @@ const TRANSLATIONS = {
     refresh: "רענן",
   },
   settings: {
-    title: "הגדרות מופע",
+    title: "{{appName}}",
     invites: "הזמנות",
     users: "משתמשים",
     workspaces: "סביבות עבודה",

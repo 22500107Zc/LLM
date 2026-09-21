@@ -66,7 +66,7 @@ const TRANSLATIONS = {
     refresh: "重新整理",
   },
   settings: {
-    title: "系統設定",
+    title: "{{appName}}",
     invites: "邀請",
     users: "使用者",
     workspaces: "工作區",

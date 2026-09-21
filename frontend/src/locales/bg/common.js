@@ -76,7 +76,7 @@ const TRANSLATIONS = {
     goToWorkspace: 'Към "{{workspace}}"',
   },
   settings: {
-    title: "Настройки на инсталацията",
+    title: "{{appName}}",
     invites: "Покани",
     users: "Потребители",
     workspaces: "Работни пространства",

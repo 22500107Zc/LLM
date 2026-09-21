@@ -70,7 +70,7 @@ const TRANSLATIONS = {
     refresh: "Reîmprospătează",
   },
   settings: {
-    title: "Setările instanței",
+    title: "{{appName}}",
     invites: "Invitații",
     users: "Utilizatori",
     workspaces: "Spații de lucru",

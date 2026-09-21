@@ -4,6 +4,9 @@ const InheritMultiple = require("./helpers/classes.js");
 const UnTooled = require("./helpers/untooled.js");
 const { tooledStream, tooledComplete } = require("./helpers/tooled.js");
 const { RetryError } = require("../error.js");
+const {
+  providerAttributionHeaders,
+} = require("../../../helpers/providerAttribution");
 
 /**
  * The agent provider for the CometAPI provider.
@@ -19,8 +22,8 @@ class CometApiProvider extends InheritMultiple([Provider, UnTooled]) {
       baseURL: "https://api.cometapi.com/v1",
       apiKey: process.env.COMETAPI_LLM_API_KEY,
       defaultHeaders: {
-        "HTTP-Referer": "https://anythingllm.com",
-        "X-CometAPI-Source": "anythingllm",
+        ...providerAttributionHeaders(),
+        "X-CometAPI-Source": "platform",
       },
     });
 

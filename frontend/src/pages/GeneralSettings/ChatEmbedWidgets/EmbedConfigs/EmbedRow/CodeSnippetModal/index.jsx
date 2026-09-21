@@ -38,7 +38,8 @@ See more style and config options on our docs
 <script
   data-embed-id="${embed.uuid}"
   data-base-api-url="${serverHost}/api/embed"
-  src="${scriptHost}/embed/anythingllm-chat-widget.min.js">
+  data-no-sponsor="true"
+  src="${scriptHost}/embed/platform-chat-widget.min.js">
 </script>
 <!-- Website AI agent -->
 `;

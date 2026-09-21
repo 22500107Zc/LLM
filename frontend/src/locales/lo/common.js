@@ -77,7 +77,7 @@ const TRANSLATIONS = {
     goToWorkspace: 'ໄປທີ່ "{{workspace}}"',
   },
   settings: {
-    title: "ການຕັ້ງຄ່າລະບົບ",
+    title: "{{appName}}",
     invites: "ການເຊື້ອເຊີນ",
     users: "ຜູ້ໃຊ້",
     workspaces: "ພື້ນທີ່ເຮັດວຽກ",

@@ -69,7 +69,7 @@ const TRANSLATIONS = {
     refresh: "リフレッシュ",
   },
   settings: {
-    title: "インスタンス設定",
+    title: "{{appName}}",
     invites: "招待",
     users: "ユーザー",
     workspaces: "ワークスペース",

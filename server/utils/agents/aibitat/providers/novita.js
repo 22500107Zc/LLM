@@ -5,6 +5,9 @@ const UnTooled = require("./helpers/untooled.js");
 const { tooledStream, tooledComplete } = require("./helpers/tooled.js");
 const { RetryError } = require("../error.js");
 const { NovitaLLM } = require("../../../AiProviders/novita/index.js");
+const {
+  providerAttributionHeaders,
+} = require("../../../helpers/providerAttribution");
 
 /**
  * The agent provider for the Novita AI provider.
@@ -22,8 +25,8 @@ class NovitaProvider extends InheritMultiple([Provider, UnTooled]) {
       baseURL: "https://api.novita.ai/v3/openai",
       apiKey: process.env.NOVITA_LLM_API_KEY,
       defaultHeaders: {
-        "HTTP-Referer": "https://anythingllm.com",
-        "X-Novita-Source": "anythingllm",
+        ...providerAttributionHeaders(),
+        "X-Novita-Source": "platform",
       },
     });
 

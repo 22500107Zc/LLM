@@ -69,7 +69,7 @@ const TRANSLATIONS = {
     refresh: "Värskendada",
   },
   settings: {
-    title: "Instantsi seaded",
+    title: "{{appName}}",
     invites: "Kutsed",
     users: "Kasutajad",
     workspaces: "Tööruumid",

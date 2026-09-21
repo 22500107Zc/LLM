@@ -68,7 +68,7 @@ const TRANSLATIONS = {
     refresh: "새롭게",
   },
   settings: {
-    title: "인스턴스 설정",
+    title: "{{appName}}",
     invites: "초대",
     users: "사용자",
     workspaces: "워크스페이스",

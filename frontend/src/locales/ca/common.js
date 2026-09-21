@@ -77,7 +77,7 @@ const TRANSLATIONS = {
     goToWorkspace: 'Ves a "{{workspace}}"',
   },
   settings: {
-    title: "Configuració de la instància",
+    title: "{{appName}}",
     invites: "Invitacions",
     users: "Usuaris",
     workspaces: "Espais de treball",

@@ -70,7 +70,7 @@ const TRANSLATIONS = {
     refresh: "Verfrissen",
   },
   settings: {
-    title: "Instelling Instanties",
+    title: "{{appName}}",
     invites: "Uitnodigingen",
     users: "Gebruikers",
     workspaces: "Werkruimten",

@@ -77,7 +77,7 @@ const TRANSLATIONS = {
     goToWorkspace: 'Idi na "{{workspace}}"',
   },
   settings: {
-    title: "Postavke instance",
+    title: "{{appName}}",
     invites: "Pozivnice",
     users: "Korisnici",
     workspaces: "Radni prostori",

@@ -9,6 +9,9 @@ const fs = require("fs");
 const path = require("path");
 const { safeJsonParse } = require("../../http");
 const {
+  providerAttributionHeaders,
+} = require("../../helpers/providerAttribution");
+const {
   serviceTierParam,
 } = require("../../agents/aibitat/providers/helpers/tooled");
 const {
@@ -49,10 +52,7 @@ class OpenRouterLLM {
     this.openai = new OpenAIApi({
       baseURL: this.basePath,
       apiKey: process.env.OPENROUTER_API_KEY ?? null,
-      defaultHeaders: {
-        "HTTP-Referer": "https://anythingllm.com",
-        "X-Title": "the platform",
-      },
+      defaultHeaders: providerAttributionHeaders(),
     });
     this.model =
       modelPreference || process.env.OPENROUTER_MODEL_PREF || "openrouter/auto";

@@ -28,6 +28,9 @@ const {
 const { OllamaAILLM } = require("../../../AiProviders/ollama");
 const { LlmmanLLM } = require("../../../AiProviders/llmman");
 const { bindAbortSignal } = require("../../../helpers/abortSignals");
+const {
+  providerAttributionHeaders,
+} = require("../../../helpers/providerAttribution");
 
 /**
  * @typedef {Object} ProviderUsageMetrics
@@ -263,10 +266,7 @@ class Provider {
         return new ChatOpenAI({
           configuration: {
             baseURL: "https://openrouter.ai/api/v1",
-            defaultHeaders: {
-              "HTTP-Referer": "https://anythingllm.com",
-              "X-Title": "the platform",
-            },
+            defaultHeaders: providerAttributionHeaders(),
           },
           apiKey: process.env.OPENROUTER_API_KEY ?? null,
           ...config,

@@ -124,7 +124,8 @@ async function run() {
 
   const badLogin = await call("/request-token", {
     method: "POST",
-    body: { username: OWNER.username, password: "definitely-not-the-password" },
+    // Generated, so no test file carries a password literal at all.
+    body: { username: OWNER.username, password: ephemeralPassword() },
     token: null,
   });
   results.record("Wrong password is rejected", !badLogin.json?.token, `HTTP ${badLogin.status}`);

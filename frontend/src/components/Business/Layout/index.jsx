@@ -16,7 +16,11 @@ export default function BusinessPage({
 }) {
   return (
     <div className="flex flex-col w-full h-full overflow-y-auto">
-      <div className="flex flex-col w-full max-w-[1400px] mx-auto px-6 py-8 gap-y-6">
+      {/*
+        On a phone the application renders a fixed 64px header bar, so the
+        page heading needs to clear it. Extra top padding below `md` only.
+      */}
+      <div className="flex flex-col w-full max-w-[1400px] mx-auto px-4 md:px-6 pt-20 md:pt-8 pb-8 gap-y-6">
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex flex-col gap-y-1">
             <h1 className="text-2xl font-semibold text-theme-text-primary">

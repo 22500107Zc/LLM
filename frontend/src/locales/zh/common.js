@@ -66,7 +66,7 @@ const TRANSLATIONS = {
     refresh: "重新开始；更新",
   },
   settings: {
-    title: "设置",
+    title: "{{appName}}",
     invites: "邀请",
     users: "用户",
     workspaces: "工作区",

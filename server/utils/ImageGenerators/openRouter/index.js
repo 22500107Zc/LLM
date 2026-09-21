@@ -1,4 +1,7 @@
 const { BaseImageGenerator } = require("../base");
+const {
+  providerAttributionHeaders,
+} = require("../../helpers/providerAttribution");
 
 class OpenRouterImageGenerator extends BaseImageGenerator {
   _extractImageBuffer(dataUrl) {
@@ -16,10 +19,7 @@ class OpenRouterImageGenerator extends BaseImageGenerator {
       client: new OpenAIApi({
         baseURL: "https://openrouter.ai/api/v1",
         apiKey: process.env.IMAGE_GEN_OPENROUTER_API_KEY,
-        defaultHeaders: {
-          "HTTP-Referer": "https://anythingllm.com",
-          "X-Title": "the platform",
-        },
+        defaultHeaders: providerAttributionHeaders(),
       }),
       model: process.env.IMAGE_GEN_MODEL_PREF,
       className: "OpenRouterImageGenerator",

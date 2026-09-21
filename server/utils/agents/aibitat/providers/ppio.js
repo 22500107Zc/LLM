@@ -4,6 +4,9 @@ const InheritMultiple = require("./helpers/classes.js");
 const UnTooled = require("./helpers/untooled.js");
 const { tooledStream, tooledComplete } = require("./helpers/tooled.js");
 const { RetryError } = require("../error.js");
+const {
+  providerAttributionHeaders,
+} = require("../../../helpers/providerAttribution");
 
 /**
  * The agent provider for the PPIO AI provider.
@@ -19,8 +22,8 @@ class PPIOProvider extends InheritMultiple([Provider, UnTooled]) {
       baseURL: "https://api.ppinfra.com/v3/openai",
       apiKey: process.env.PPIO_API_KEY,
       defaultHeaders: {
-        "HTTP-Referer": "https://anythingllm.com",
-        "X-API-Source": "anythingllm",
+        ...providerAttributionHeaders(),
+        "X-API-Source": "platform",
       },
     });
 

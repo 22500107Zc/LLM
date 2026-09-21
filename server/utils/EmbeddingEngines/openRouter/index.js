@@ -1,4 +1,7 @@
 const { toChunks, reportEmbeddingProgress } = require("../../helpers");
+const {
+  providerAttributionHeaders,
+} = require("../../helpers/providerAttribution");
 
 class OpenRouterEmbedder {
   constructor() {
@@ -9,10 +12,7 @@ class OpenRouterEmbedder {
     this.openai = new OpenAIApi({
       baseURL: "https://openrouter.ai/api/v1",
       apiKey: process.env.OPENROUTER_API_KEY,
-      defaultHeaders: {
-        "HTTP-Referer": "https://anythingllm.com",
-        "X-Title": "the platform",
-      },
+      defaultHeaders: providerAttributionHeaders(),
     });
     this.model = process.env.EMBEDDING_MODEL_PREF || "baai/bge-m3";
 

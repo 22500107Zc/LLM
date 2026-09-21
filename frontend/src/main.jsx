@@ -11,6 +11,7 @@ import Login from "@/pages/Login";
 import SimpleSSOPassthrough from "@/pages/Login/SSO/simple";
 import OnboardingFlow from "@/pages/OnboardingFlow";
 import "@/index.css";
+import { loadBrand } from "@/business/brand";
 
 const isDev = import.meta.env.DEV;
 const REACTWRAP = isDev ? React.Fragment : React.StrictMode;
@@ -573,8 +574,22 @@ const router = createBrowserRouter([
   },
 ]);
 
-ReactDOM.createRoot(document.getElementById("root")).render(
-  <REACTWRAP>
-    <RouterProvider router={router} />
-  </REACTWRAP>
-);
+function mount() {
+  ReactDOM.createRoot(document.getElementById("root")).render(
+    <REACTWRAP>
+      <RouterProvider router={router} />
+    </REACTWRAP>
+  );
+}
+
+// The deployment's branding decides the product name, company name, colours
+// and the browser tab title, so it is fetched before the first render rather
+// than after it - otherwise every page paints the generic fallback first and
+// the customer sees someone else's product name flash past. loadBrand never
+// rejects; a failed fetch resolves to the fallback.
+loadBrand()
+  .then((brand) => {
+    const name = brand?.branding?.appName;
+    if (name) document.title = name;
+  })
+  .finally(mount);

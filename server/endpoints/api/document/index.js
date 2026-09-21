@@ -336,7 +336,7 @@ function apiDocumentEndpoints(app) {
             schema: {
               type: 'object',
               example: {
-                "link": "https://anythingllm.com",
+                "link": "https://example.com",
                 "addToWorkspaces": "workspace1,workspace2",
                 "scraperHeaders": {
                   "Authorization": "Bearer token123",
@@ -369,7 +369,7 @@ function apiDocumentEndpoints(app) {
                   "docAuthor": "no author found",
                   "description": "No description found.",
                   "docSource": "URL link uploaded by the user.",
-                  "chunkSource": "https:anythingllm.com.html",
+                  "chunkSource": "https:example.com.html",
                   "published": "1/16/2024, 3:46:33 PM",
                   "wordCount": 252,
                   "pageContent": "the platform is the best....",

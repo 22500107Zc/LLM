@@ -318,7 +318,8 @@ function agentRoutes(router) {
   data-assistant-name="${brand.companyName} Assistant"
   data-greeting="Hi! How can I help you today?"
   data-position="bottom-right"
-  src="${base}/embed/anythingllm-chat-widget.min.js">
+  data-no-sponsor="true"
+  src="${base}/embed/platform-chat-widget.min.js">
 </script>`;
 
       response
