@@ -10,6 +10,13 @@ const { AuditLog } = require("../models/audit");
  * commercial product adds, plus public-surface protection.
  */
 
+// The owner check only needs to run once per process.
+let ownerEnsured = null;
+function ensureOwnerOnce() {
+  if (!ownerEnsured) ownerEnsured = Team.ensureOwner().catch(() => null);
+  return ownerEnsured;
+}
+
 /**
  * Resolves the caller's business role onto `response.locals` so downstream
  * handlers and audit records can use it. Must run after `validatedRequest`.
@@ -24,6 +31,10 @@ async function attachBusinessRole(_request, response, next) {
       response.locals.capabilities = Team.capabilitiesFor(Team.BUSINESS_ROLES.OWNER);
       return next();
     }
+    // A deployment must always have exactly one Owner; without this the first
+    // admin created by upstream's setup flow could never reach Billing.
+    await ensureOwnerOnce();
+
     const role = await Team.roleFor(user);
     response.locals.businessRole = role;
     response.locals.capabilities = Team.capabilitiesFor(role);

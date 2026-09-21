@@ -176,7 +176,10 @@ function agentRoutes(router) {
         {
           workspace_id: agent.workspace_id,
           chat_mode: body.chatMode === "chat" ? "chat" : "query",
-          allowlist_domains: JSON.stringify(domains),
+          // Pass the array as-is: EmbedConfig normalizes each entry to a URL
+          // and JSON-encodes it. Pre-stringifying makes its comma-splitting
+          // path drop every domain.
+          allowlist_domains: domains,
           max_chats_per_day: body.maxChatsPerDay ?? 200,
           max_chats_per_session: body.maxChatsPerSession ?? 30,
           message_limit: body.messageLimit ?? 20,
@@ -232,7 +235,7 @@ function agentRoutes(router) {
             error:
               "At least one allowed domain is required. Removing every domain would expose this agent to any website.",
           });
-        updates.allowlist_domains = JSON.stringify(domains);
+        updates.allowlist_domains = domains;
       }
 
       const { success, error } = await EmbedConfig.update(embed.id, updates);

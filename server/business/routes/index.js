@@ -10,6 +10,10 @@ const { integrationRoutes } = require("./integrations");
 const { platformRoutes } = require("./platform");
 const { publicCaptureRoutes } = require("./publicCapture");
 const { knowledgeRoutes } = require("./knowledge");
+const {
+  requireActiveSubscription,
+  requireActiveSubscriptionForPublic,
+} = require("../middleware/billingGate");
 
 /**
  * Mounts the commercial business API.
@@ -50,6 +54,26 @@ function businessEndpoints(app) {
 
   // ---- Public visitor capture (mounted alongside upstream's embed API) ----
   publicCaptureRoutes(app);
+
+  // ---- Subscription enforcement ------------------------------------------
+  // Attached as path-scoped middleware rather than edited into each upstream
+  // chat route, so no upstream endpoint file is touched. When the deployment
+  // is not restricted these are a cached no-op.
+  //
+  // Only AI *usage* is gated. Reading data, administration and billing stay
+  // available so an owner can always resolve payment - and nothing is deleted.
+  app.use("/workspace/:slug/stream-chat", requireActiveSubscription);
+  app.use(
+    "/workspace/:slug/thread/:threadSlug/stream-chat",
+    requireActiveSubscription
+  );
+  app.use("/v1/workspace/:slug/chat", requireActiveSubscription);
+  app.use("/v1/workspace/:slug/stream-chat", requireActiveSubscription);
+  app.use("/v1/openai/chat/completions", requireActiveSubscription);
+
+  // Public website agents get the visitor-safe abort shape instead, so a
+  // customer's website never leaks the deployment's billing state.
+  app.use("/embed/:embedId/stream-chat", requireActiveSubscriptionForPublic);
 }
 
 module.exports = { businessEndpoints };

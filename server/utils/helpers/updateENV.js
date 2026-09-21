@@ -1573,6 +1573,82 @@ function dumpENV() {
 
     // Allow setting a custom timeout for tool call approval prompts
     "TOOL_CALL_APPROVAL_TIMEOUT_MS",
+
+    // ---------------------------------------------------------------------
+    // COMMERCIAL PLATFORM KEYS
+    //
+    // dumpENV() rewrites server/.env keeping ONLY the keys listed here, so any
+    // key omitted is silently deleted the next time an administrator saves a
+    // setting. Without this block a live deployment would lose its Stripe
+    // configuration, branding and operational limits the first time someone
+    // changed an unrelated setting in the UI.
+    //
+    // Keep this list in sync with server/business/config.js.
+    // ---------------------------------------------------------------------
+
+    // Branding
+    "APP_NAME",
+    "APP_TAGLINE",
+    "COMPANY_NAME",
+    "LEGAL_COMPANY_NAME",
+    "APP_LOGO",
+    "APP_ICON",
+    "PRIMARY_DOMAIN",
+    "PRIMARY_COLOR",
+    "SUPPORT_EMAIL",
+    "POWERED_BY_NOTICE",
+
+    // Customer identity
+    "CUSTOMER_NAME",
+    "CUSTOMER_DOMAIN",
+    "CUSTOMER_LOGO",
+
+    // Included operational limits
+    "MAX_USERS",
+    "MAX_PUBLIC_AGENTS",
+    "STORAGE_LIMIT_GB",
+
+    // Deployment
+    "PUBLIC_URL",
+    "BUILD_REF",
+    "BACKUP_DIR",
+    "DEFAULT_LLM_PROVIDER",
+    "DEFAULT_LLM_MODEL",
+
+    // Security posture
+    "REQUIRE_MULTI_USER_MODE",
+    "HEALTHCHECK_TOKEN",
+    "PUBLIC_RATE_LIMIT_PER_MINUTE",
+    "PUBLIC_RATE_LIMIT_BURST",
+    "ALLOW_PRIVATE_NETWORK_WEBHOOKS",
+
+    // Stripe billing - losing any of these would break billing entirely
+    "STRIPE_SECRET_KEY",
+    "STRIPE_PUBLISHABLE_KEY",
+    "STRIPE_WEBHOOK_SECRET",
+    "STRIPE_PRICE_ID",
+    "STRIPE_PRODUCT_ID",
+    "STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID",
+    "STRIPE_CUSTOMER_ID",
+    "STRIPE_SUBSCRIPTION_ID",
+    "STRIPE_API_VERSION",
+
+    // Subscription enforcement policy
+    "BILLING_ENFORCEMENT_ENABLED",
+    "BILLING_GRACE_PERIOD_DAYS",
+    "BILLING_RESTRICT_INTERNAL_CHAT",
+    "BILLING_RESTRICT_PUBLIC_AGENTS",
+    "BILLING_RESTRICT_AUTOMATIONS",
+
+    // Outbound notifications
+    "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_SECURE",
+    "SMTP_USER",
+    "SMTP_PASSWORD",
+    "SMTP_FROM",
+    "LEAD_NOTIFICATION_EMAIL",
+    "ESCALATION_NOTIFICATION_EMAIL",
   ];
 
   // Simple sanitization of each value to prevent ENV injection via newline or quote escaping.

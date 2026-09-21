@@ -216,6 +216,56 @@ const Team = {
     return (ROLE_RANK[businessRole] ?? 0) >= (ROLE_RANK[minimum] ?? 99);
   },
 
+  /**
+   * Ensures the deployment has an Owner.
+   *
+   * Multi-user mode is enabled by upstream's own setup flow, which creates a
+   * plain `admin` user and knows nothing about business roles. Without this,
+   * that first account would resolve to Administrator and could never reach
+   * Billing - locking the business out of its own subscription.
+   *
+   * The earliest admin account is promoted once; afterwards this is a no-op.
+   */
+  ensureOwner: async function () {
+    try {
+      const existing = await prisma.platform_user_profiles.findFirst({
+        where: { business_role: BUSINESS_ROLES.OWNER },
+      });
+      if (existing) return existing.user_id;
+
+      const firstAdmin = await prisma.users.findFirst({
+        where: { role: "admin", suspended: 0 },
+        orderBy: { id: "asc" },
+      });
+      if (!firstAdmin) return null;
+
+      await prisma.platform_user_profiles.upsert({
+        where: { user_id: firstAdmin.id },
+        update: { business_role: BUSINESS_ROLES.OWNER, lastUpdatedAt: new Date() },
+        create: { user_id: firstAdmin.id, business_role: BUSINESS_ROLES.OWNER },
+      });
+
+      await AuditLog.log({
+        action: "team.owner_designated",
+        category: AuditLog.CATEGORIES.USERS,
+        resource: "user",
+        resourceId: firstAdmin.id,
+        metadata: {
+          username: firstAdmin.username,
+          reason: "First administrator promoted to Owner on first access.",
+        },
+      });
+
+      console.log(
+        `\x1b[32m[Platform]\x1b[0m Designated "${firstAdmin.username}" as the deployment Owner.`
+      );
+      return firstAdmin.id;
+    } catch (error) {
+      console.error("[Team] ensureOwner failed:", error.message);
+      return null;
+    }
+  },
+
   /** The single owner of this deployment, if one has been designated. */
   owner: async function () {
     try {
