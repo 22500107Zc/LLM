@@ -270,13 +270,16 @@ const paths = {
     },
   },
 
-  // TODO: Migrate all docs.anythingllm.com links to the new docs.
+  /**
+   * Help links shown to business users resolve to the deployment's own support
+   * channel rather than the upstream project's documentation site.
+   */
   documentation: {
     mobileIntroduction: () => {
-      return "https://docs.anythingllm.com/mobile/overview";
+      return paths.support();
     },
     contextWindows: () => {
-      return "https://docs.anythingllm.com/chatting-with-documents/introduction#you-exceed-the-context-window---what-now";
+      return paths.support();
     },
   },
 

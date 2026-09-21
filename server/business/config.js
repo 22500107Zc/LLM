@@ -81,6 +81,18 @@ const config = {
     };
   },
 
+  /**
+   * Which upstream surfaces to show a business customer. The Community Hub is
+   * a working admin integration but it is an upstream-branded storefront, so
+   * it is hidden by default in the commercial build and can be switched back
+   * on for a customer who wants it.
+   */
+  get features() {
+    return {
+      showCommunityHub: bool("SHOW_COMMUNITY_HUB", false),
+    };
+  },
+
   /** Operational safeguards included with the plan. Not pricing tiers. */
   get limits() {
     return {
@@ -212,6 +224,7 @@ const config = {
         currency: PLAN.currency,
       },
       limits: this.limits,
+      features: this.features,
       version: this.deployment.version,
     };
   },

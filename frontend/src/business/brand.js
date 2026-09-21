@@ -30,6 +30,7 @@ const FALLBACK = Object.freeze({
     currency: "usd",
   },
   limits: { maxUsers: 50, maxPublicAgents: 3, storageLimitGb: 25 },
+  features: { showCommunityHub: false },
   version: "",
 });
 
@@ -58,6 +59,7 @@ export async function loadBrand() {
             customer: { ...FALLBACK.customer, ...(data.customer ?? {}) },
             plan: { ...FALLBACK.plan, ...(data.plan ?? {}) },
             limits: { ...FALLBACK.limits, ...(data.limits ?? {}) },
+            features: { ...FALLBACK.features, ...(data.features ?? {}) },
           }
         : FALLBACK;
       listeners.forEach((listener) => listener(cache));
@@ -105,6 +107,11 @@ export function primaryColor() {
   return brand().branding.primaryColor;
 }
 
+/** Whether an upstream surface is enabled for this deployment. */
+export function features() {
+  return brand().features;
+}
+
 export function planPrice() {
   return brand().plan.displayPriceWithInterval;
 }
@@ -119,4 +126,5 @@ export default {
   supportMailto,
   primaryColor,
   planPrice,
+  features,
 };

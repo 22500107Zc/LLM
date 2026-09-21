@@ -1,5 +1,13 @@
 /**
  * Document pipeline acceptance: PDF + DOCX ingestion, embedding, RAG retrieval
+ *
+ * Requires BOTH services running:
+ *   cd server    && NODE_ENV=production node index.js
+ *   cd collector && node index.js
+ *
+ * Run from the server directory so the vector store resolves:
+ *   cd server && DOCS_DIR=<dir with the test files> node ../scripts/document-pipeline-test.cjs
+ *
  * with citations, and per-agent knowledge isolation.
  *
  * Retrieval is exercised directly against the vector store because generating
@@ -57,6 +65,15 @@ function collectFiles(node, folder, acc) {
   TOKEN = login.json?.token;
   rec("Authenticated", !!TOKEN);
   if (!TOKEN) return done();
+
+  // Ingestion needs the collector; without it uploads are stored unparsed and
+  // every downstream assertion would fail for a misleading reason.
+  const collectorUp = await fetch("http://localhost:8888/")
+    .then((r) => r.ok)
+    .catch(() => false);
+  rec("Document processor is running", collectorUp,
+    collectorUp ? "port 8888" : "start it with: cd collector && node index.js");
+  if (!collectorUp) return done();
 
   const agents = await api("/business/agents");
   const agent =

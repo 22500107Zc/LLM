@@ -1608,6 +1608,9 @@ function dumpENV() {
     "MAX_PUBLIC_AGENTS",
     "STORAGE_LIMIT_GB",
 
+    // Upstream surface visibility
+    "SHOW_COMMUNITY_HUB",
+
     // Deployment
     "PUBLIC_URL",
     "BUILD_REF",

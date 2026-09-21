@@ -39,6 +39,7 @@ import System from "@/models/system";
 import Option from "./MenuOption";
 import { CanViewChatHistoryProvider } from "../CanViewChatHistory";
 import useAppVersion from "@/hooks/useAppVersion";
+import { features } from "@/business/brand";
 
 export default function SettingsSidebar() {
   const { t } = useTranslation();
@@ -447,6 +448,10 @@ const SidebarOptions = ({ user = null, t }) => (
             />
           }
           user={user}
+          // An upstream-branded storefront. The feature still works; it is
+          // simply not shown to a business customer unless SHOW_COMMUNITY_HUB
+          // is enabled for that deployment.
+          hidden={!features().showCommunityHub}
           childOptions={[
             {
               btnText: t("settings.community-hub.trending"),
