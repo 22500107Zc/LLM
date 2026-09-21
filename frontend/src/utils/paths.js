@@ -92,6 +92,7 @@ const paths = {
     conversations: () => "/conversations",
     leads: () => "/leads",
     analytics: () => "/analytics",
+    value: () => "/value",
     knowledgeGaps: () => "/knowledge-gaps",
     quality: () => "/ai-quality",
     team: () => "/team",

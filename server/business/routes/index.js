@@ -10,6 +10,7 @@ const { integrationRoutes } = require("./integrations");
 const { platformRoutes } = require("./platform");
 const { publicCaptureRoutes } = require("./publicCapture");
 const { knowledgeRoutes } = require("./knowledge");
+const { valueRoutes } = require("./value");
 const {
   requireActiveSubscription,
   requireActiveSubscriptionForPublic,
@@ -40,6 +41,7 @@ function businessEndpoints(app) {
   insightRoutes(businessRouter);
   teamRoutes(businessRouter);
   integrationRoutes(businessRouter);
+  valueRoutes(businessRouter);
 
   // ---- Unauthenticated platform surface ----------------------------------
   const publicRouter = express.Router();

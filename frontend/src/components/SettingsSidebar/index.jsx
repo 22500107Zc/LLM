@@ -14,6 +14,7 @@ import {
   // Business AI Operations Platform navigation icons.
   ChartLine,
   ChartBar,
+  Scales,
   Robot,
   Globe,
   BookOpen,
@@ -279,6 +280,13 @@ const SidebarOptions = ({ user = null, t }) => (
           btnText="Analytics"
           icon={<ChartBar className="h-5 w-5 flex-shrink-0" />}
           href={paths.business.analytics()}
+          user={user}
+          roles={["admin", "manager"]}
+        />
+        <Option
+          btnText="Value"
+          icon={<Scales className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.value()}
           user={user}
           roles={["admin", "manager"]}
         />

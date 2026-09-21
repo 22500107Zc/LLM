@@ -503,6 +503,13 @@ const router = createBrowserRouter([
         },
       },
       {
+        path: "/value",
+        lazy: async () => {
+          const { default: ValuePage } = await import("@/pages/Business/Value");
+          return { element: <ManagerRoute Component={ValuePage} /> };
+        },
+      },
+      {
         path: "/knowledge-gaps",
         lazy: async () => {
           const { default: KnowledgeGapsPage } = await import(

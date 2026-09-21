@@ -231,6 +231,29 @@ const Business = {
     deliveries: (uuid) => request(`/integrations/${uuid}/deliveries`),
   },
 
+  // --- value evidence ------------------------------------------------------
+  value: {
+    summary: (period) =>
+      request(`/value/summary?period=${encodeURIComponent(period)}`),
+    records: (params = {}) =>
+      request(`/value/records?${new URLSearchParams(params)}`),
+    history: (uuid) => request(`/value/records/${uuid}/history`),
+    scenarios: (params = {}) =>
+      request(`/value/scenarios?${new URLSearchParams(params)}`),
+    create: (body) => request("/value/records", { method: "POST", body }),
+    setVerification: (uuid, verification, note = null) =>
+      request(`/value/records/${uuid}/verification`, {
+        method: "POST",
+        body: { verification, note },
+      }),
+    remove: (uuid) => request(`/value/records/${uuid}`, { method: "DELETE" }),
+    exportCsv: (period) =>
+      download(
+        `/value/export?period=${encodeURIComponent(period)}`,
+        `value-${period}.csv`
+      ),
+  },
+
   // --- platform ------------------------------------------------------------
   settings: {
     get: () => request("/settings"),

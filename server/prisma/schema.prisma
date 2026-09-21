@@ -787,3 +787,57 @@ model billing_pending_checkouts {
 
   @@index([deployment_id])
 }
+
+/// A single claim of business value delivered by the platform.
+///
+/// Deliberately conservative: a record only counts toward realized value once
+/// a human has verified it against evidence. A captured lead is NOT revenue
+/// and can never be recorded as one.
+model value_records {
+  id                Int       @id @default(autoincrement())
+  uuid              String    @unique
+  category          String
+  /// realized_gross_profit | avoided_cost
+  kind              String
+  /// The month this value belongs to, stored as YYYY-MM.
+  period            String
+  amount_cents      Int
+  currency          String    @default("usd")
+  recurring         Boolean   @default(true)
+  /// pending | verified | rejected
+  verification      String    @default("pending")
+  description       String?
+  /// Where the number came from, e.g. an invoice or CRM opportunity id.
+  evidence_ref      String?
+  evidence_note     String?
+  /// Stops the same underlying event being counted twice.
+  source_system     String?
+  source_reference  String?
+  dedupe_key        String    @unique
+  /// For avoided-cost records: the customer-approved pre-deployment figure
+  /// and the measured figure afterwards. Both are required to verify.
+  baseline_cents    Int?
+  measured_cents    Int?
+  baseline_approved_by String?
+  createdBy         Int?
+  verifiedBy        Int?
+  verifiedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  lastUpdatedAt     DateTime  @default(now())
+
+  @@index([period])
+  @@index([verification])
+}
+
+/// Append-only history for every change to a value record.
+model value_record_events {
+  id              Int      @id @default(autoincrement())
+  value_record_id Int
+  action          String
+  actor_id        Int?
+  actor_label     String?
+  detail          String?
+  occurredAt      DateTime @default(now())
+
+  @@index([value_record_id])
+}
