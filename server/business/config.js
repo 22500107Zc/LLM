@@ -10,14 +10,45 @@
  * anywhere, including at boot before the database is available.
  */
 
+/** The commercial amount, in cents, overridable per deployment. */
+const DEFAULT_PLAN_AMOUNT_CENTS = 388888; // $3,888.88
+
+function planAmountCents() {
+  const configured = Number(process.env.PLAN_AMOUNT_CENTS);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.trunc(configured)
+    : DEFAULT_PLAN_AMOUNT_CENTS;
+}
+
+function formatAmount(cents, currency = "usd") {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency.toUpperCase(),
+    }).format(cents / 100);
+  } catch {
+    return `${(cents / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  }
+}
+
+/**
+ * The commercial plan. The amount is read fresh so PLAN_AMOUNT_CENTS applies
+ * without a rebuild, and it is validated against Stripe before checkout so a
+ * mismatch is visible rather than silently charging the wrong price.
+ */
 const PLAN = Object.freeze({
   name: "Managed Business AI Platform",
-  // Stored in cents to avoid float drift. 3888.88 USD -> 388888 cents.
-  amountCents: 388888,
   currency: "usd",
   interval: "month",
-  displayPrice: "$3,888.88",
-  displayPriceWithInterval: "$3,888.88/month",
+  get amountCents() {
+    return planAmountCents();
+  },
+  get displayPrice() {
+    return formatAmount(planAmountCents(), "usd");
+  },
+  get displayPriceWithInterval() {
+    return `${formatAmount(planAmountCents(), "usd")}/month`;
+  },
 });
 
 function str(key, fallback = "") {
@@ -108,6 +139,17 @@ const config = {
       provider: str("DEFAULT_LLM_PROVIDER", ""),
       model: str("DEFAULT_LLM_MODEL", ""),
     };
+  },
+
+  /**
+   * The immutable identity of THIS deployment.
+   *
+   * It is stamped into every Stripe object this deployment creates and is
+   * required to bind the deployment to a Stripe customer, so an unrelated
+   * event from the same Stripe account can never claim it.
+   */
+  get deploymentId() {
+    return str("DEPLOYMENT_ID", "");
   },
 
   /** Stripe configuration. Secret values are never returned to the browser. */
@@ -218,6 +260,7 @@ const config = {
       },
       plan: {
         name: PLAN.name,
+        amountCents: PLAN.amountCents,
         displayPrice: PLAN.displayPrice,
         displayPriceWithInterval: PLAN.displayPriceWithInterval,
         interval: PLAN.interval,

@@ -501,6 +501,11 @@ model model_router_rules {
 /// Singleton (id = 1) record holding the deployment's Stripe subscription state.
 model billing_subscription {
   id                     Int       @id @default(1)
+  /// The DEPLOYMENT_ID that owns this binding. Set atomically at bind time and
+  /// never changed afterwards.
+  bound_deployment_id    String?
+  bound_at               DateTime?
+  bound_via              String?
   stripe_customer_id     String?
   stripe_subscription_id String?
   stripe_price_id        String?
@@ -763,4 +768,22 @@ model platform_settings {
   value         String?
   createdAt     DateTime @default(now())
   lastUpdatedAt DateTime @default(now())
+}
+
+/// A Checkout Session this deployment created, recorded BEFORE the owner is
+/// redirected to Stripe. An unbound deployment may only bind itself from a
+/// session it can find here, which stops an unrelated event from the same
+/// Stripe account becoming the first binding.
+model billing_pending_checkouts {
+  id                 Int       @id @default(autoincrement())
+  session_id         String    @unique
+  deployment_id      String
+  expected_customer  String?
+  price_id           String?
+  status             String    @default("pending")
+  createdAt          DateTime  @default(now())
+  consumedAt         DateTime?
+  expiresAt          DateTime
+
+  @@index([deployment_id])
 }

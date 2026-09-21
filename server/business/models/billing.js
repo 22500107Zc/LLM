@@ -204,8 +204,9 @@ const Billing = {
       billing_email: invoice.customer_email ?? current?.billing_email ?? null,
     };
 
-    if (typeof invoice.customer === "string")
-      patch.stripe_customer_id = invoice.customer;
+    // Deliberately does NOT set stripe_customer_id. Binding is owned by
+    // business/billing/binding.js and may only happen from a Checkout Session
+    // this deployment created - an invoice must never establish it.
 
     if (outcome === "paid") {
       patch.last_payment_status = "succeeded";

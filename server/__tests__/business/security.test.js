@@ -305,6 +305,9 @@ describe("boot posture checks", () => {
     const strong = () => require("crypto").randomBytes(32).toString("hex");
     const { errors } = evaluatePosture({
       NODE_ENV: "production",
+      // Required since the Stripe binding hardening: without it the
+      // deployment cannot prove which Stripe objects are its own.
+      DEPLOYMENT_ID: strong(),
       JWT_SECRET: strong(),
       SIG_KEY: strong(),
       SIG_SALT: strong(),

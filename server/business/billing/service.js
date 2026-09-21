@@ -2,6 +2,7 @@ const config = require("../config");
 const { client, isConfigured } = require("./stripe");
 const { Billing, STATUS } = require("../models/billing");
 const { AuditLog } = require("../models/audit");
+const binding = require("./binding");
 
 /**
  * Commercial billing operations.
@@ -133,6 +134,8 @@ async function ensureCustomer(details = {}) {
       email: details.email || record?.billing_email || undefined,
       name: details.name || config.customer.name || undefined,
       metadata: {
+        // Stamped so a webhook can prove this object belongs to us.
+        deployment_id: config.deploymentId,
         deployment:
           config.customer.domain || config.branding.primaryDomain || "",
         platform: config.branding.appName,
@@ -158,10 +161,26 @@ async function ensureCustomer(details = {}) {
  */
 async function createCheckoutSession(options = {}) {
   if (!isConfigured()) return notConfigured();
+  if (!config.deploymentId)
+    return {
+      success: false,
+      error:
+        "This deployment has no DEPLOYMENT_ID configured, so it cannot safely be bound to a Stripe customer.",
+    };
   const stripe = client();
 
   const { priceId, error: priceError } = await resolvePriceId();
   if (!priceId) return { success: false, error: priceError };
+
+  // Charging the wrong amount is worse than not charging at all: refuse rather
+  // than silently bill something other than the configured commercial price.
+  const priceCheck = await verifyPriceMatchesPlan();
+  if (priceCheck.reason === "price_mismatch")
+    return {
+      success: false,
+      error: `The configured Stripe price does not match ${PLAN.displayPriceWithInterval}. Checkout is blocked until it is corrected.`,
+      priceCheck,
+    };
 
   const { customer, error: customerError } = await ensureCustomer({
     email: options.email,
@@ -183,13 +202,24 @@ async function createCheckoutSession(options = {}) {
       subscription_data: {
         metadata: {
           platform: config.branding.appName,
+          deployment_id: config.deploymentId,
           deployment: config.customer.domain || "",
         },
       },
       metadata: {
         platform: config.branding.appName,
         plan: PLAN.name,
+        deployment_id: config.deploymentId,
+        deployment: config.customer.domain || "",
       },
+    });
+
+    // Recorded BEFORE the owner is redirected: an unbound deployment accepts a
+    // binding only from a Checkout Session it can find in this table.
+    await binding.recordPendingCheckout({
+      sessionId: session.id,
+      expectedCustomer: customer.id,
+      priceId,
     });
 
     await AuditLog.log({
@@ -235,11 +265,18 @@ async function createInvoicedSubscription(options = {}) {
       days_until_due: Math.max(1, Number(options.daysUntilDue) || 30),
       metadata: {
         platform: config.branding.appName,
+        deployment_id: config.deploymentId,
         deployment: config.customer.domain || "",
       },
       expand: ["latest_invoice"],
     });
 
+    // This deployment created the subscription directly, so binding here is
+    // safe and does not depend on an inbound event arriving first.
+    await binding.bindCustomer({
+      customerId: customer.id,
+      via: "invoiced_subscription",
+    });
     await Billing.applySubscription(subscription, {
       reason: "invoice.subscription",
     });

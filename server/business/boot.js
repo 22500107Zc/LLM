@@ -73,6 +73,22 @@ function evaluatePosture(env = process.env) {
       );
   }
 
+  // --- Deployment identity --------------------------------------------------
+  // Without a DEPLOYMENT_ID this deployment cannot prove which Stripe objects
+  // are its own, so an unrelated event from the same Stripe account could bind
+  // it to the wrong customer.
+  const deploymentId = env.DEPLOYMENT_ID ?? "";
+  if (isProduction) {
+    if (!deploymentId)
+      errors.push(
+        "DEPLOYMENT_ID is not set. Generate one with `openssl rand -hex 32` and set it permanently for this deployment."
+      );
+    else if (deploymentId.trim().length < 24)
+      errors.push(
+        "DEPLOYMENT_ID is too short to be unguessable. Generate one with `openssl rand -hex 32`."
+      );
+  }
+
   // --- Public embed exposure ------------------------------------------------
   if (isProduction && !config.security.requireEmbedAllowlist)
     warnings.push(
@@ -117,6 +133,15 @@ function evaluatePosture(env = process.env) {
   if (stripe.publishableKey && stripe.publishableKey.startsWith("sk_"))
     errors.push(
       "STRIPE_PUBLISHABLE_KEY contains a secret key. Publishable keys start with pk_. Fix this before starting."
+    );
+
+  // The commercial amount must be explicit and sane.
+  const planAmount = Number(env.PLAN_AMOUNT_CENTS ?? config.PLAN.amountCents);
+  if (!Number.isFinite(planAmount) || planAmount <= 0)
+    errors.push("PLAN_AMOUNT_CENTS must be a positive whole number of cents.");
+  else if (stripe.secretKey && planAmount !== config.PLAN.amountCents)
+    warnings.push(
+      `PLAN_AMOUNT_CENTS (${planAmount}) does not match the resolved plan amount (${config.PLAN.amountCents}).`
     );
 
   if (config.billingPolicy.enforcementEnabled && !stripe.secretKey)

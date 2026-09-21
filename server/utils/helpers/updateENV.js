@@ -1611,6 +1611,10 @@ function dumpENV() {
     // Upstream surface visibility
     "SHOW_COMMUNITY_HUB",
 
+    // Deployment identity - losing this would let an unrelated Stripe event
+    // bind this deployment to the wrong customer.
+    "DEPLOYMENT_ID",
+
     // Deployment
     "PUBLIC_URL",
     "BUILD_REF",
@@ -1637,6 +1641,7 @@ function dumpENV() {
     "STRIPE_API_VERSION",
 
     // Subscription enforcement policy
+    "PLAN_AMOUNT_CENTS",
     "BILLING_ENFORCEMENT_ENABLED",
     "BILLING_GRACE_PERIOD_DAYS",
     "BILLING_RESTRICT_INTERNAL_CHAT",

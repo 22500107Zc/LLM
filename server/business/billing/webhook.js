@@ -3,6 +3,7 @@ const config = require("../config");
 const { client, isConfigured } = require("./stripe");
 const { Billing } = require("../models/billing");
 const { AuditLog } = require("../models/audit");
+const binding = require("./binding");
 
 /**
  * Stripe webhook receiver.
@@ -86,20 +87,6 @@ async function releaseEvent(eventId) {
   }
 }
 
-/**
- * Guards against a webhook endpoint that is (mis)configured to receive events
- * for a Stripe account serving several deployments. We only apply events whose
- * customer matches the one this deployment is bound to.
- */
-async function isForThisDeployment(customerId) {
-  if (!customerId) return true; // Nothing to compare against; let it through.
-  const record = await Billing.get();
-  const known = record?.stripe_customer_id || config.stripe.customerId;
-  // Before the deployment is bound to a customer, the first event binds it.
-  if (!known) return true;
-  return known === customerId;
-}
-
 function customerIdFrom(object) {
   if (!object) return null;
   const { customer } = object;
@@ -138,14 +125,13 @@ async function applyEvent(event) {
     case "checkout.session.completed": {
       if (object.mode !== "subscription")
         return "ignored: non-subscription checkout";
-      const customerId = customerIdFrom(object);
-      if (customerId)
+      // The customer was bound by the binding layer before we got here, so
+      // this only records the contact detail that came with the session.
+      const email =
+        object.customer_details?.email ?? object.customer_email ?? null;
+      if (email)
         await Billing.update(
-          {
-            stripe_customer_id: customerId,
-            billing_email:
-              object.customer_details?.email ?? object.customer_email ?? null,
-          },
+          { billing_email: email },
           { reason: "checkout.session.completed" }
         );
 
@@ -312,12 +298,41 @@ async function handleStripeWebhook(request, response) {
   }
 
   const customerId = customerIdFrom(event.data?.object);
-  if (!(await isForThisDeployment(customerId))) {
-    await finishEvent(event.id, "skipped", "Event belongs to another customer");
+  const authorization = await binding.authorizeEvent(event, customerId);
+
+  if (!authorization.allowed) {
+    await finishEvent(event.id, "rejected", authorization.reason);
+    // Log enough to investigate, and nothing sensitive: no payload, no
+    // deployment secret, only the identifiers Stripe already shows us.
     console.warn(
-      `[Billing webhook] ignoring event ${event.id} for foreign customer ${customerId}`
+      `[Billing webhook] rejected ${event.type} (${event.id}): ${authorization.reason}`
     );
+    await AuditLog.log({
+      action: "billing.foreign_event_rejected",
+      category: AuditLog.CATEGORIES.SECURITY,
+      resource: "stripe_event",
+      resourceId: event.id,
+      metadata: {
+        type: event.type,
+        reason: authorization.reason,
+        customerId: customerId ?? null,
+      },
+    });
+    // Acknowledged so Stripe stops retrying an event that will never apply.
     return response.status(200).json({ received: true });
+  }
+
+  // Bind only after authorization has proven the event is ours to bind from.
+  if (authorization.bindWith) {
+    const bindResult = await binding.bindCustomer(authorization.bindWith);
+    if (bindResult.result === binding.BIND_RESULT.REJECTED) {
+      await finishEvent(event.id, "rejected", bindResult.reason);
+      console.warn(
+        `[Billing webhook] refused to bind from ${event.id}: ${bindResult.reason}`
+      );
+      return response.status(200).json({ received: true });
+    }
+    await binding.consumePendingCheckout(authorization.bindWith.sessionId);
   }
 
   try {
@@ -341,11 +356,5 @@ module.exports = {
   handleStripeWebhook,
   HANDLED_EVENTS,
   // Exported for tests.
-  _internals: {
-    claimEvent,
-    releaseEvent,
-    applyEvent,
-    customerIdFrom,
-    isForThisDeployment,
-  },
+  _internals: { claimEvent, releaseEvent, applyEvent, customerIdFrom },
 };
