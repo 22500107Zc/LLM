@@ -1,19 +1,10 @@
 {
-  "name": "anything-llm",
+  "name": "business-ai-operations-platform",
   "version": "1.16.1",
-  "description": "The best solution for turning private documents into a chat bot using off-the-shelf tools and commercially viable AI technologies.",
+  "description": "Managed Business AI Operations Platform - one business, one dedicated deployment.",
   "main": "index.js",
   "type": "module",
-  "author": "Timothy Carambat (Mintplex Labs)",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/mintplex-labs/anything-llm.git"
-  },
-  "bugs": {
-    "url": "https://github.com/mintplex-labs/anything-llm/issues"
-  },
-  "homepage": "https://github.com/mintplex-labs/anything-llm#readme",
   "engines": {
     "node": ">=18"
   },
@@ -39,7 +30,7 @@
     "translations:prune": "cd frontend/src/locales && node findUnusedTranslations.mjs --delete && cd ../../../ && yarn translations:normalize",
     "translations:create": "cd extras/translator && node index.mjs --all && cd ../../frontend && yarn lint && cd ../.."
   },
-  "private": false,
+  "private": true,
   "devDependencies": {
     "concurrently": "^9.1.2",
     "jest": "^29.7.0"

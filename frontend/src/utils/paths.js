@@ -77,7 +77,7 @@ const paths = {
   chatModes: () => {
     return paths.support();
   },
-  mailToMintplex: () => {
+  supportEmail: () => {
     return paths.support();
   },
   hosting: () => {
@@ -267,7 +267,7 @@ const paths = {
       return `${this.website()}/me`;
     },
     noPrivateItems: () => {
-      return "https://docs.anythingllm.com/community-hub/faq#no-private-items";
+      return paths.docs("/community-hub/faq#no-private-items");
     },
   },
 

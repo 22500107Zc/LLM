@@ -1,11 +1,10 @@
 {
-  "name": "anything-llm-document-collector",
+  "name": "platform-document-collector",
   "version": "1.16.1",
   "description": "Document collector server endpoints",
   "main": "index.js",
-  "author": "Timothy Carambat (Mintplex Labs)",
   "license": "MIT",
-  "private": false,
+  "private": true,
   "engines": {
     "node": ">=18.12.1"
   },

@@ -2,6 +2,7 @@ import { ArrowSquareOut, Info } from "@phosphor-icons/react";
 import { AWS_REGIONS } from "./regions";
 import { useState, useEffect } from "react";
 import System from "@/models/system";
+import paths from "@/utils/paths";
 
 const MANUAL_REGION_ENTRY = "-- Enter region manually --";
 
@@ -27,12 +28,12 @@ export default function AwsBedrockLLMOptions({ settings }) {
               Connect to AWS Bedrock using the OpenAI-compatible Mantle API.
               <br />
               <a
-                href="https://docs.anythingllm.com/setup/llm-configuration/cloud/aws-bedrock"
+                href={paths.docs("/setup/llm-configuration/cloud/aws-bedrock")}
                 target="_blank"
                 className="underline flex gap-x-1 items-center"
                 rel="noreferrer"
               >
-                Read more on how to use AWS Bedrock in AnythingLLM
+                Read more on how to use AWS Bedrock in the platform
                 <ArrowSquareOut size={14} />
               </a>
             </p>

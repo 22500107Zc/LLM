@@ -1,11 +1,10 @@
 {
-  "name": "anything-llm-server",
+  "name": "platform-server",
   "version": "1.16.1",
   "description": "Server endpoints to process or create content for chatting",
   "main": "index.js",
-  "author": "Timothy Carambat (Mintplex Labs)",
   "license": "MIT",
-  "private": false,
+  "private": true,
   "engines": {
     "node": ">=18.12.1"
   },

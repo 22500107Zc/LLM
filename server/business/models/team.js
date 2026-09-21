@@ -4,7 +4,7 @@ const { AuditLog } = require("./audit");
 /**
  * The simplified business role model.
  *
- * Upstream AnythingLLM has three roles (admin / manager / default). Rather than
+ * Upstream the platform has three roles (admin / manager / default). Rather than
  * rewriting that permission system, the five business-facing roles are layered
  * on top: each maps down onto an upstream role that continues to govern all
  * upstream routes, while the business API additionally enforces the finer

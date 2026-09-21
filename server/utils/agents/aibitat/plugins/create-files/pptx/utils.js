@@ -1,4 +1,5 @@
 const createFilesLib = require("../lib.js");
+const { deploymentName } = require("../deploymentBrand.js");
 
 // All positioning assumes LAYOUT_16x9: 10 × 5.625 in.
 const MARGIN_X = 0.7;
@@ -44,7 +45,7 @@ function addBranding(slide, bgColor) {
       transparency: 78,
     });
   } else {
-    slide.addText("AnythingLLM", {
+    slide.addText(deploymentName(), {
       x: 7.85,
       y: 5.17,
       w: 1.85,

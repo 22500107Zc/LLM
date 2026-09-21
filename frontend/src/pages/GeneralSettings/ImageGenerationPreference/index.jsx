@@ -3,7 +3,7 @@ import Sidebar from "@/components/SettingsSidebar";
 import { isMobile } from "react-device-detect";
 import System from "@/models/system";
 import showToast from "@/utils/toast";
-import AnythingLLMIcon from "@/media/logo/anything-llm-icon.png";
+import PlatformMark from "@/media/logo/platform-mark.png";
 import OpenAiLogo from "@/media/llmprovider/openai.png";
 import OllamaLogo from "@/media/llmprovider/ollama.png";
 import LemonadeLogo from "@/media/llmprovider/lemonade.png";
@@ -230,7 +230,7 @@ export default function ImageGenerationPreference() {
                   >
                     <div className="flex gap-x-4 items-center">
                       <img
-                        src={selectedProviderObject?.logo || AnythingLLMIcon}
+                        src={selectedProviderObject?.logo || PlatformMark}
                         alt={`${selectedProviderObject?.name} logo`}
                         className="w-10 h-10 rounded-md"
                       />

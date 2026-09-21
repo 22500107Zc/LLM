@@ -36,7 +36,7 @@ class MetaGenerator {
       return require("../../business/config").branding;
     } catch {
       return {
-        appName: "AnythingLLM",
+        appName: "the platform",
         tagline: "",
         primaryDomain: "",
         appIcon: "",

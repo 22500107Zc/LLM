@@ -42,8 +42,8 @@ export default function LiveSyncToggle({ enabled = false, onToggle }) {
         <div className="flex flex-col space-y-4">
           <p className="text-theme-text-secondary text-sm">
             Enable the ability to specify a document to be "watched". Watched
-            document's content will be regularly fetched and updated in
-            AnythingLLM.
+            document's content will be regularly fetched and updated in the
+            platform.
           </p>
           <p className="text-theme-text-secondary text-sm">
             Watched documents will automatically update in all workspaces they
@@ -59,7 +59,9 @@ export default function LiveSyncToggle({ enabled = false, onToggle }) {
         <ul className="space-y-2">
           <li>
             <a
-              href="https://docs.anythingllm.com/beta-preview/active-features/live-document-sync"
+              href={paths.docs(
+                "/beta-preview/active-features/live-document-sync"
+              )}
               target="_blank"
               className="text-sm text-blue-400 light:text-blue-500 hover:underline flex items-center gap-x-1"
               rel="noreferrer"

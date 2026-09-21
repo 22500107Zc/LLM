@@ -7,6 +7,7 @@ import { useModal } from "@/hooks/useModal";
 import RecoveryCodeModal from "@/components/Modals/DisplayRecoveryCodeModal";
 import { useTranslation } from "react-i18next";
 import PasswordInput from "@/components/lib/PasswordInput";
+import { appName } from "@/business/brand";
 
 export default function SingleUserAuth() {
   const { t } = useTranslation();
@@ -82,7 +83,7 @@ export default function SingleUserAuth() {
               </h3>
             </div>
             <p className="text-zinc-400 light:text-zinc-600 text-sm text-center">
-              {t("login.sign-in", { appName: customAppName || "AnythingLLM" })}
+              {t("login.sign-in", { appName: customAppName || appName() })}
             </p>
           </div>
         </div>

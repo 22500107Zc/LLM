@@ -253,10 +253,10 @@ function getLLMProvider({ provider = null, model = null } = {}) {
       const { VertexLLM } = require("../AiProviders/vertex");
       return new VertexLLM(embedder, model);
     case "anythingllm-router":
-      // Model router is handled separately in stream.js via AnythingLLMModelRouter.
+      // Model router is handled separately in stream.js via PlatformModelRouter.
       // This case should not be hit directly - if it is, throw a descriptive error.
       throw new Error(
-        "anythingllm-router provider must be resolved via AnythingLLMModelRouter class, not getLLMProvider directly."
+        "anythingllm-router provider must be resolved via PlatformModelRouter class, not getLLMProvider directly."
       );
     default:
       throw new Error(
@@ -478,8 +478,8 @@ function getLLMProviderClass({ provider = null } = {}) {
       const { VertexLLM } = require("../AiProviders/vertex");
       return VertexLLM;
     case "anythingllm-router":
-      const { AnythingLLMModelRouter } = require("../AiProviders/modelRouter");
-      return AnythingLLMModelRouter;
+      const { PlatformModelRouter } = require("../AiProviders/modelRouter");
+      return PlatformModelRouter;
     default:
       return null;
   }
@@ -691,7 +691,7 @@ async function resolveProviderConnector({
     };
   }
 
-  const { AnythingLLMModelRouter } = require("../AiProviders/modelRouter");
+  const { PlatformModelRouter } = require("../AiProviders/modelRouter");
   const { ModelRouterService } = require("../router");
 
   const routerWorkspace = workspace?.router_id
@@ -703,7 +703,7 @@ async function resolveProviderConnector({
           : null,
       };
 
-  const router = new AnythingLLMModelRouter(routerWorkspace);
+  const router = new PlatformModelRouter(routerWorkspace);
   const ctx = await ModelRouterService.gatherRoutingContext({
     workspace,
     user,

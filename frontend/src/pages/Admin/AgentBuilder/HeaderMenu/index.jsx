@@ -1,5 +1,5 @@
 import { CaretDown, CaretUp, Plus, CaretLeft } from "@phosphor-icons/react";
-import AnythingInfinityLogo from "@/media/logo/anything-llm-infinity.png";
+import PlatformMarkSmall from "@/media/logo/platform-mark-small.png";
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import paths from "@/utils/paths";
@@ -54,7 +54,7 @@ export default function HeaderMenu({
               className="!border-t-transparent !border-l-transparent !border-b-transparent flex items-center gap-x-2 px-4 py-2 border-r border-white/10 hover:bg-theme-action-menu-bg transition-colors duration-300"
             >
               <img
-                src={AnythingInfinityLogo}
+                src={PlatformMarkSmall}
                 alt="logo"
                 className="w-[20px] light:invert"
               />
@@ -136,7 +136,7 @@ export default function HeaderMenu({
             </button>
           </div>
           <Link
-            to="https://docs.anythingllm.com/agent-flows/overview"
+            to={paths.docs("/agent-flows/overview")}
             className="text-theme-text-secondary text-sm hover:underline hover:text-cta-button flex items-center gap-x-1 w-fit float-right"
           >
             view documentation &rarr;

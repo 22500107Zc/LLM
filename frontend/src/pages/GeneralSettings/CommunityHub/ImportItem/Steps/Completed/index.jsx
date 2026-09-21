@@ -14,8 +14,7 @@ export default function Completed({ settings, setSettings, setStep }) {
           <div className="flex flex-col gap-y-[25px] text-theme-text-secondary text-sm">
             <p>
               The "{settings.item.name}" {settings.item.itemType} has been
-              imported successfully! It is now available in your AnythingLLM
-              instance.
+              imported successfully! It is now available in your deployment.
             </p>
             {settings.item.itemType === "agent-flow" && (
               <Link

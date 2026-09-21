@@ -26,10 +26,10 @@ const { patchShellEnvironmentPath } = require("../../helpers/shell");
  *
  * @notice This class is a singleton.
  * @notice Each MCP tool has dependencies specific to it and this call WILL NOT check for them.
- * For example, if the tools requires `npx` then the context in which AnythingLLM mains process is running will need to access npx.
+ * For example, if the tools requires `npx` then the context in which the platform mains process is running will need to access npx.
  * This is typically not common in our pre-built image so may not function. But this is the case anywhere MCP is used.
  *
- * AnythingLLM will take care of porting MCP servers to agent-callable functions via @agent directive.
+ * the platform will take care of porting MCP servers to agent-callable functions via @agent directive.
  * @see MCPCompatibilityLayer.convertServerToolsToPlugins
  */
 class MCPHypervisor {

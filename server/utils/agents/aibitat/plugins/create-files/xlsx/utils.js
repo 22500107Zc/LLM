@@ -5,6 +5,8 @@
  * @param {string} [delimiter=","] - The field delimiter
  * @returns {string[][]} 2D array of parsed values
  */
+
+const { deploymentName } = require("../deploymentBrand.js");
 function parseCSV(csvString, delimiter = ",") {
   const rows = [];
   let currentRow = [];
@@ -186,8 +188,8 @@ function inferCellType(value) {
 }
 
 /**
- * Applies AnythingLLM branding to an Excel workbook.
- * Adds a subtle "Created with AnythingLLM" text row below the data on each sheet.
+ * Applies this deployment's branding to an Excel workbook.
+ * Adds a subtle "Created with <product name>" row below the data on each sheet.
  * @param {import('exceljs').Workbook} workbook - The ExcelJS workbook instance
  */
 function applyBranding(workbook) {
@@ -202,7 +204,7 @@ function applyBranding(workbook) {
     }
 
     const brandingCell = worksheet.getCell(brandingRowNum, 1);
-    brandingCell.value = "Created with AnythingLLM";
+    brandingCell.value = `Created with ${deploymentName()}`;
     brandingCell.font = {
       italic: true,
       size: 9,

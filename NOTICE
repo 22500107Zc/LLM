@@ -1,0 +1,36 @@
+# Notices and Attribution
+
+## This product
+
+Managed Business AI Operations Platform. Sold and operated as a dedicated,
+single-business deployment.
+
+## Upstream project
+
+This product is a derivative work of **AnythingLLM** by **Mintplex Labs Inc.**,
+used and redistributed under the MIT License. The upstream copyright notice and
+the full MIT License text are preserved verbatim in `LICENSE`, as that licence
+requires.
+
+    The MIT License
+    Copyright (c) Mintplex Labs Inc.
+
+The upstream project is at https://github.com/Mintplex-Labs/anything-llm.
+
+This product is **not** affiliated with, endorsed by, or supported by Mintplex
+Labs Inc. Support for this product comes from the vendor named in the
+deployment's configuration, never from the upstream project.
+
+## Why upstream branding does not appear in the product
+
+The customer-facing application is white-labelled: it shows the business's own
+product name, logo and support address, supplied per deployment. Removing the
+upstream product name from the interface is a branding decision and is
+permitted by the MIT License; it does not remove the attribution above, which
+is required and is preserved.
+
+## Third-party dependencies
+
+The application depends on open-source packages whose licences and copyright
+notices ship with them in `node_modules` and are reproduced in each package's
+own distribution. Their licences are unchanged by this product.

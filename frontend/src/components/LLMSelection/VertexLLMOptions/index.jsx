@@ -2,6 +2,7 @@ import { ArrowSquareOut, Info } from "@phosphor-icons/react";
 import { VERTEX_REGIONS } from "./regions";
 import { useState, useEffect } from "react";
 import System from "@/models/system";
+import paths from "@/utils/paths";
 
 const MANUAL_REGION_ENTRY = "-- Enter region manually --";
 
@@ -26,12 +27,14 @@ export default function VertexLLMOptions({ settings }) {
               endpoint and a Vertex AI API key.
               <br />
               <a
-                href="https://docs.anythingllm.com/setup/llm-configuration/cloud/google-vertex"
+                href={paths.docs(
+                  "/setup/llm-configuration/cloud/google-vertex"
+                )}
                 target="_blank"
                 className="underline flex gap-x-1 items-center"
                 rel="noreferrer"
               >
-                Read more on how to use Google Vertex AI in AnythingLLM
+                Read more on how to use Google Vertex AI in the platform
                 <ArrowSquareOut size={14} />
               </a>
             </p>

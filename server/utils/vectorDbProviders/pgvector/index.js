@@ -171,7 +171,7 @@ class PGVector extends VectorDatabase {
 
     if (result.rows.length === 0)
       throw new Error(
-        `The table '${tableName}' was found but does not contain any columns or cannot be accessed by role. It cannot be used as an embedding table in AnythingLLM.`
+        `The table '${tableName}' was found but does not contain any columns or cannot be accessed by role. It cannot be used as an embedding table in the platform.`
       );
 
     for (const rowDef of expectedSchema) {

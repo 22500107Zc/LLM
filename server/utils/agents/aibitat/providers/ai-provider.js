@@ -122,7 +122,7 @@ class Provider {
   providerTag = null;
 
   /**
-   * The AnythingLLM provider slug this instance was built for (eg: "openai",
+   * The the platform provider slug this instance was built for (eg: "openai",
    * "anthropic") - set by AIbitat when the provider is instantiated. Unlike
    * `providerTag` or `constructor.name`, this matches the slugs used for
    * model pricing lookups. Null when the origin of the instance is unknown.
@@ -265,7 +265,7 @@ class Provider {
             baseURL: "https://openrouter.ai/api/v1",
             defaultHeaders: {
               "HTTP-Referer": "https://anythingllm.com",
-              "X-Title": "AnythingLLM",
+              "X-Title": "the platform",
             },
           },
           apiKey: process.env.OPENROUTER_API_KEY ?? null,
@@ -563,7 +563,7 @@ class Provider {
   static contextLimit(provider = "openai", modelName) {
     if (typeof provider !== "string") {
       console.log(
-        `\x1b[43m\x1b[30m[.contextLimit warning] A non-string provider for .contextLimit was given — Returning fallback context limit of 8000.\x1b[0m\n\x1b[43m\x1b[30mThis is a bug and should be reported so that context windows are properly managed by AnythingLLM.\x1b[0m`
+        `\x1b[43m\x1b[30m[.contextLimit warning] A non-string provider for .contextLimit was given — Returning fallback context limit of 8000.\x1b[0m\n\x1b[43m\x1b[30mThis is a bug and should be reported so that context windows are properly managed by the platform.\x1b[0m`
       );
       console.trace();
       return 8_000;
@@ -572,7 +572,7 @@ class Provider {
     const llm = getLLMProviderClass({ provider });
     if (!llm || !llm.hasOwnProperty("promptWindowLimit")) {
       console.warn(
-        `\x1b[33m[.contextLimit warning]\x1b[0m Could not determine .promptWindowLimit for provider ${provider}. This could lead to incorrect context window management by AnythingLLM since we cannot determine the context window limit for this provider/model combination.`
+        `\x1b[33m[.contextLimit warning]\x1b[0m Could not determine .promptWindowLimit for provider ${provider}. This could lead to incorrect context window management by the platform since we cannot determine the context window limit for this provider/model combination.`
       );
       return 8_000;
     }

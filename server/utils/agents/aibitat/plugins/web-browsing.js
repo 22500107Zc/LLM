@@ -1,6 +1,6 @@
 const { SystemSettings } = require("../../../../models/systemSettings");
 const { TokenManager } = require("../../../helpers/tiktoken");
-const { getAnythingLLMUserAgent } = require("../../../../endpoints/utils");
+const { getPlatformUserAgent } = require("../../../../endpoints/utils");
 const tiktoken = new TokenManager();
 
 const webBrowsing = {
@@ -24,9 +24,9 @@ const webBrowsing = {
             "Search the internet for real-time information. Look online for current news, recent updates, latest changes, or any information not available locally. Browse the web to find answers about current events, prices, weather, or live data.",
           examples: [
             {
-              prompt: "Look online for recent changes to AnythingLLM",
+              prompt: "Look online for recent changes to our product",
               call: JSON.stringify({
-                query: "AnythingLLM recent changes updates",
+                query: "the platform recent changes updates",
               }),
             },
             {
@@ -454,7 +454,7 @@ const webBrowsing = {
               headers: {
                 Authorization: `Bearer ${process.env.AGENT_SEARCHAPI_API_KEY}`,
                 "Content-Type": "application/json",
-                "X-SearchApi-Source": "AnythingLLM",
+                "X-SearchApi-Source": "the platform",
               },
             })
               .then((res) => {
@@ -1130,7 +1130,7 @@ const webBrowsing = {
                 headers: {
                   "Content-Type": "application/json",
                   Authorization: `Bearer ${process.env.AGENT_PERPLEXITY_API_KEY}`,
-                  "X-Pplx-Integration": getAnythingLLMUserAgent(),
+                  "X-Pplx-Integration": getPlatformUserAgent(),
                 },
                 body: JSON.stringify({
                   query: query,
@@ -1384,7 +1384,7 @@ const webBrowsing = {
             const headers = {
               "Content-Type": "application/json",
               "User-Agent": "keenable-anythingllm",
-              "X-Keenable-Title": getAnythingLLMUserAgent(),
+              "X-Keenable-Title": getPlatformUserAgent(),
             };
 
             // Keyless public endpoint by default; keyed endpoint + X-API-Key
@@ -1478,7 +1478,7 @@ const webBrowsing = {
               // Pin identity encoding: keyless endpoint can advertise gzip with
               // body bytes that Node's decoder rejects (same workaround as LiteLLM).
               "Accept-Encoding": "identity",
-              "X-Client-Info": `skill; client=${getAnythingLLMUserAgent()}`,
+              "X-Client-Info": `skill; client=${getPlatformUserAgent()}`,
             };
             if (usingKey) headers["X-API-Key"] = apiKey;
 

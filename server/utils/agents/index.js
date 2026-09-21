@@ -486,7 +486,7 @@ class AgentHandler {
   }
 
   async #resolveRouterProvider(prompt = null) {
-    const { AnythingLLMModelRouter } = require("../AiProviders/modelRouter");
+    const { PlatformModelRouter } = require("../AiProviders/modelRouter");
     const routerWorkspace = this.invocation.workspace.router_id
       ? this.invocation.workspace
       : {
@@ -510,7 +510,7 @@ class AgentHandler {
       thread = this._threadSlug ? { slug: this._threadSlug } : null;
     }
 
-    const router = new AnythingLLMModelRouter(routerWorkspace);
+    const router = new PlatformModelRouter(routerWorkspace);
     const { ModelRouterService } = require("../router");
     const workspace = this.invocation.workspace;
     const user = this.invocation.user_id
