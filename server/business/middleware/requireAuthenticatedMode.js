@@ -54,12 +54,24 @@ function isBootstrapPath(path) {
 
 let cachedMultiUser = { value: null, expiresAt: 0 };
 
+/**
+ * Only a POSITIVE result is cached.
+ *
+ * Caching "multi-user mode is off" would keep blocking every request for the
+ * life of the cache entry after an operator finishes setup, so a freshly
+ * provisioned deployment would appear broken for the first few seconds of its
+ * life. A negative answer is re-read each time - one indexed lookup - so the
+ * guard opens the instant setup completes.
+ */
 async function multiUserEnabled() {
   const now = Date.now();
-  if (cachedMultiUser.value !== null && cachedMultiUser.expiresAt > now)
-    return cachedMultiUser.value;
+  if (cachedMultiUser.value === true && cachedMultiUser.expiresAt > now)
+    return true;
+
   const value = await SystemSettings.isMultiUserMode();
-  cachedMultiUser = { value, expiresAt: now + 15_000 };
+  cachedMultiUser = value
+    ? { value: true, expiresAt: now + 15_000 }
+    : { value: null, expiresAt: 0 };
   return value;
 }
 

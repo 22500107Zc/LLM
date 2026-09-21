@@ -239,6 +239,36 @@ Test a restore into a scratch directory before you need one:
 
 ---
 
+## 8a. Testing — never against a customer deployment
+
+The acceptance, document and provider suites **create and delete data**: users,
+agents, website agents, leads, escalations, quality tests and API keys. They
+are written for a disposable deployment and refuse any non-local `BASE_URL`
+unless `ALLOW_REMOTE_ACCEPTANCE=1` is set deliberately, which prints a
+destructive-test warning.
+
+Run them the safe way — this stands up a throwaway deployment with its own
+storage, secrets and port, runs everything, saves the logs and tears it down:
+
+```bash
+./scripts/run-disposable-acceptance.sh
+```
+
+Results land in `test-results/<timestamp>/`. The runner prefers Docker and
+falls back to isolated local processes when no daemon is available.
+
+Provider-backed verification (real answers, citations, refusals, isolation)
+needs a configured model provider. Without one it reports
+`BLOCKED: PROVIDER CREDENTIAL REQUIRED` rather than passing:
+
+```bash
+BASE_URL=http://localhost:3001 \
+DOC_TEST_USER=<admin> DOC_TEST_PASSWORD=<password> \
+  node scripts/provider-verification.cjs
+```
+
+---
+
 ## 9. Stripe events consumed
 
 | Event | Effect |

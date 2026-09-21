@@ -10,9 +10,13 @@ generator client {
 //   provider = "postgresql"
 //   url      = env("DATABASE_URL")
 // }
+// The URL comes from DATABASE_URL. utils/prisma defaults it to the historical
+// path (server/storage/anythingllm.db) when it is unset, so existing
+// deployments behave exactly as before, while an operator can point a
+// dedicated customer deployment - or a disposable test run - at its own file.
 datasource db {
   provider = "sqlite"
-  url      = "file:../storage/anythingllm.db"
+  url      = env("DATABASE_URL")
 }
 
 model api_keys {

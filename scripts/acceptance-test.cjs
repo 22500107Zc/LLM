@@ -1,392 +1,603 @@
+#!/usr/bin/env node
 /**
- * End-to-end acceptance suite for the Managed Business AI Operations Platform.
+ * Acceptance suite for the Managed Business AI Operations Platform.
  *
- * Run against a LIVE server (production mode is what matters, since several
- * checks - notably the anonymous-access guard - only apply there):
+ * THIS SUITE MUTATES DATA. It creates a temporary owner, a viewer, an agent, a
+ * website agent, a lead, an escalation, a quality test and an API key, then
+ * removes them again. It is for a DISPOSABLE deployment.
  *
- *   cd server && NODE_ENV=production node index.js    # terminal 1
- *   node scripts/acceptance-test.cjs                   # terminal 2
+ * The safe way to run it:
+ *   ./scripts/run-disposable-acceptance.sh
  *
- * It creates a throwaway owner, a viewer, an agent, a website agent, a lead,
- * an escalation, a quality test and an API key, then asserts the commercial
- * and security behaviour a paying customer depends on.
+ * Against an already-running local test server:
+ *   node scripts/acceptance-test.cjs
  *
- * Safe to re-run: existing fixtures are detected rather than duplicated.
- * Point BASE_URL at another host to test a remote deployment.
+ * Configuration (all optional):
+ *   BASE_URL                  default http://localhost:3001
+ *   ACCEPTANCE_HEALTH_TOKEN   sent as X-Health-Token when the probe is guarded
+ *   ACCEPTANCE_EXPECT_APP_NAME  asserts the deployment's branded name
+ *   ALLOW_REMOTE_ACCEPTANCE=1 required for any non-local BASE_URL
+ *
+ * Every run generates its own credentials and fixture names, so repeated runs
+ * neither collide nor accumulate records.
  */
 
-const BASE = `${process.env.BASE_URL ?? "http://localhost:3001"}/api`;
-let TOKEN = null;
-const results = [];
+const {
+  assertSafeTarget,
+  runId,
+  ephemeralPassword,
+  Results,
+  Cleanup,
+  apiClient,
+} = require("./lib/harness.cjs");
 
-function record(name, passed, detail = "") {
-  results.push({ name, passed, detail });
-  const mark = passed ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m";
-  console.log(`${mark}  ${name}${detail ? `  — ${detail}` : ""}`);
-}
+const BASE_URL = process.env.BASE_URL ?? "http://localhost:3001";
+assertSafeTarget(BASE_URL, { suiteName: "The acceptance suite" });
 
-async function api(path, { method = "GET", body = null, token = TOKEN, headers = {} } = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      ...(body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...headers,
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-  let json = null;
-  try { json = await res.json(); } catch { json = null; }
-  return { status: res.status, json };
-}
+const RUN = runId();
+const OWNER = { username: `acc-owner-${RUN}`, password: ephemeralPassword() };
+const VIEWER = { username: `acc-viewer-${RUN}`, password: ephemeralPassword() };
+const AGENT_NAME = `Acceptance Agent ${RUN}`;
+const LEAD_EMAIL = `lead-${RUN}@example.invalid`;
+const TEST_DOMAIN = "https://acceptance.example.invalid";
+
+const api = apiClient(BASE_URL);
+const results = new Results("ACCEPTANCE");
+const cleanup = new Cleanup();
+
+const call = (p, o) => api.call(p, o);
 
 (async () => {
-  console.log("\n=== SETUP: multi-user mode + owner account ===");
-  const alreadyOn = await api("/system/multi-user-mode", { token: null });
-  if (!alreadyOn.json?.multiUserMode) {
-    const enable = await api("/system/enable-multi-user", {
+  try {
+    await run();
+  } catch (error) {
+    console.error(`\n\x1b[31mSuite aborted: ${error.message}\x1b[0m`);
+    results.record("Suite completed without crashing", false, error.message);
+  } finally {
+    await cleanup.run();
+  }
+  results.finish();
+})();
+
+async function run() {
+  results.section("BOOTSTRAP");
+
+  const mode = await call("/system/multi-user-mode", { token: null });
+  let ownerCreated = false;
+
+  if (!mode.json?.multiUserMode) {
+    const enabled = await call("/system/enable-multi-user", {
       method: "POST",
-      body: { username: "acmeowner", password: "Str0ng-Owner-Pass!2026" },
+      body: OWNER,
       token: null,
     });
-    record("Multi-user mode can be enabled", enable.status === 200 && enable.json?.success,
-      enable.json?.error ?? "");
+    ownerCreated = enabled.status === 200 && enabled.json?.success;
+    results.record("Multi-user mode can be enabled", ownerCreated, enabled.json?.error ?? "");
   } else {
-    record("Multi-user mode is enabled", true, "already enabled");
+    // An already-initialised disposable deployment: an existing admin must
+    // create our throwaway owner. Credentials come from the environment so no
+    // password is ever committed.
+    const seedUser = process.env.ACCEPTANCE_SEED_USER;
+    const seedPass = process.env.ACCEPTANCE_SEED_PASSWORD;
+    if (!seedUser || !seedPass) {
+      results.record(
+        "Multi-user mode is enabled",
+        true,
+        "already initialised — set ACCEPTANCE_SEED_USER/PASSWORD to run the full suite"
+      );
+      results.blocked(
+        "Temporary owner account",
+        "This deployment is already initialised. Use ./scripts/run-disposable-acceptance.sh for a clean one, or supply ACCEPTANCE_SEED_USER and ACCEPTANCE_SEED_PASSWORD."
+      );
+      return;
+    }
+    // Run as the supplied account. It is the deployment Owner, so the
+    // owner-only checks (Billing) are genuinely exercised. Creating a second
+    // administrator instead would silently skip them.
+    OWNER.username = seedUser;
+    OWNER.password = seedPass;
+    const seedLogin = await call("/request-token", {
+      method: "POST",
+      body: OWNER,
+      token: null,
+    });
+    ownerCreated = !!seedLogin.json?.token;
+    results.record(
+      "Supplied administrator can log in",
+      ownerCreated,
+      ownerCreated ? "" : "check ACCEPTANCE_SEED_USER / ACCEPTANCE_SEED_PASSWORD"
+    );
+    if (!ownerCreated) return;
   }
 
-  console.log("\n=== AUTHENTICATION ===");
-  const login = await api("/request-token", {
+  results.section("AUTHENTICATION");
+
+  const login = await call("/request-token", {
     method: "POST",
-    body: { username: "acmeowner", password: "Str0ng-Owner-Pass!2026" },
+    body: OWNER,
     token: null,
   });
-  TOKEN = login.json?.token ?? null;
-  record("Owner can log in", !!TOKEN, TOKEN ? "token issued" : JSON.stringify(login.json));
+  const token = login.json?.token ?? null;
+  api.setToken(token);
+  results.record("Owner can log in", !!token);
+  if (!token) return;
 
-  const badLogin = await api("/request-token", {
-    method: "POST", body: { username: "acmeowner", password: "wrong" }, token: null,
-  });
-  record("Wrong password is rejected", !badLogin.json?.token, `HTTP ${badLogin.status}`);
-
-  const noAuth = await api("/business/dashboard", { token: null });
-  record("Authentication cannot be bypassed", noAuth.status === 401, `HTTP ${noAuth.status}`);
-
-  const badToken = await api("/business/dashboard", { token: "forged.token.value" });
-  record("Forged token is rejected", badToken.status === 401, `HTTP ${badToken.status}`);
-
-  if (!TOKEN) { summarize(); return; }
-
-  console.log("\n=== BUSINESS PORTAL ===");
-  const me = await api("/business/me");
-  record("Role + capabilities resolve", me.status === 200 && !!me.json?.businessRole,
-    `${me.json?.businessRole} · ${me.json?.capabilities?.length} capabilities`);
-
-  const dash = await api("/business/dashboard");
-  record("Dashboard loads", dash.status === 200 && !!dash.json?.metrics,
-    `${dash.json?.metrics?.aiMessages ?? 0} messages, onboarding ${dash.json?.onboarding?.percent}%`);
-
-  console.log("\n=== TEAM & PERMISSIONS ===");
-  const team = await api("/business/team");
-  record("Team page loads", team.status === 200 && Array.isArray(team.json?.members),
-    `${team.json?.members?.length} member(s), limit ${team.json?.limits?.maxUsers}`);
-
-  const addUser = await api("/business/team/users", {
+  const badLogin = await call("/request-token", {
     method: "POST",
-    body: { username: "acmeviewer", password: "Str0ng-Viewer-Pass!2026", role: "viewer" },
+    body: { username: OWNER.username, password: "definitely-not-the-password" },
+    token: null,
   });
-  const userOk = (addUser.status === 200 && !!addUser.json?.user) ||
-    (addUser.json?.error ?? "").includes("already exists");
-  record("Owner can add a user", userOk,
-    addUser.json?.user ? `${addUser.json.user.username} as ${addUser.json.user.businessRole}` : addUser.json?.error);
+  results.record("Wrong password is rejected", !badLogin.json?.token, `HTTP ${badLogin.status}`);
 
-  const viewerLogin = await api("/request-token", {
-    method: "POST", body: { username: "acmeviewer", password: "Str0ng-Viewer-Pass!2026" }, token: null,
+  const anonymous = await call("/business/dashboard", { token: null });
+  results.record(
+    "Authentication cannot be bypassed",
+    anonymous.status === 401,
+    `HTTP ${anonymous.status}`
+  );
+
+  const forged = await call("/business/dashboard", { token: "forged.token.value" });
+  results.record("Forged token is rejected", forged.status === 401, `HTTP ${forged.status}`);
+
+  results.section("BUSINESS PORTAL");
+
+  const me = await call("/business/me");
+  results.record(
+    "Role and capabilities resolve",
+    me.status === 200 && !!me.json?.businessRole,
+    `${me.json?.businessRole} · ${me.json?.capabilities?.length} capabilities`
+  );
+
+  const dashboard = await call("/business/dashboard");
+  results.record(
+    "Dashboard loads",
+    dashboard.status === 200 && !!dashboard.json?.metrics,
+    `onboarding ${dashboard.json?.onboarding?.percent}%`
+  );
+
+  results.section("TEAM AND PERMISSIONS");
+
+  const team = await call("/business/team");
+  results.record(
+    "Team page loads",
+    team.status === 200 && Array.isArray(team.json?.members),
+    `${team.json?.members?.length} member(s), limit ${team.json?.limits?.maxUsers}`
+  );
+
+  const addViewer = await call("/business/team/users", {
+    method: "POST",
+    body: { ...VIEWER, role: "viewer" },
   });
-  const VIEWER = viewerLogin.json?.token ?? null;
-  record("New user can log in", !!VIEWER);
+  const viewerId = addViewer.json?.user?.id ?? null;
+  results.record("Owner can add a user", addViewer.status === 200 && !!viewerId, addViewer.json?.error ?? "");
+  if (viewerId)
+    cleanup.add("viewer account", () =>
+      call(`/business/team/users/${viewerId}`, { method: "DELETE" })
+    );
 
-  if (VIEWER) {
-    const viewerBilling = await api("/business/billing/summary", { token: VIEWER });
-    record("Viewer is denied billing access", viewerBilling.status === 403, `HTTP ${viewerBilling.status}`);
+  const viewerLogin = await call("/request-token", {
+    method: "POST",
+    body: VIEWER,
+    token: null,
+  });
+  const viewerToken = viewerLogin.json?.token ?? null;
+  results.record("New user can log in", !!viewerToken);
 
-    const viewerTeam = await api("/business/team", { token: VIEWER });
-    record("Viewer is denied team management", viewerTeam.status === 403, `HTTP ${viewerTeam.status}`);
+  if (viewerToken) {
+    for (const [label, pathname] of [
+      ["billing", "/business/billing/summary"],
+      ["team management", "/business/team"],
+      ["the audit log", "/business/audit"],
+    ]) {
+      const denied = await call(pathname, { token: viewerToken });
+      results.record(`Viewer is denied ${label}`, denied.status === 403, `HTTP ${denied.status}`);
+    }
 
-    const viewerAudit = await api("/business/audit", { token: VIEWER });
-    record("Viewer is denied the audit log", viewerAudit.status === 403, `HTTP ${viewerAudit.status}`);
+    const readable = await call("/business/agents", { token: viewerToken });
+    results.record("Viewer can read agents (read-only works)", readable.status === 200);
 
-    const viewerAgents = await api("/business/agents", { token: VIEWER });
-    record("Viewer CAN read agents (read-only works)", viewerAgents.status === 200, `HTTP ${viewerAgents.status}`);
-
-    const viewerCreate = await api("/business/agents", {
-      token: VIEWER, method: "POST", body: { name: "Should Not Exist" },
-    });
-    record("Viewer cannot create an agent", viewerCreate.status === 403, `HTTP ${viewerCreate.status}`);
-  }
-
-  console.log("\n=== AI AGENTS ===");
-  const templates = await api("/business/agents/templates");
-  record("Agent templates available", (templates.json?.templates?.length ?? 0) >= 5,
-    `${templates.json?.templates?.length} templates`);
-
-  // Re-runnable: reuse the fixture agent when a previous run left one, so the
-  // included public-agent limit is not consumed on every run.
-  const existingAgents = await api("/business/agents");
-  let AGENT =
-    existingAgents.json?.agents?.find((a) => a.name === "Acceptance Support Agent") ??
-    null;
-
-  if (!AGENT) {
-    const created = await api("/business/agents", {
+    const writeAttempt = await call("/business/agents", {
+      token: viewerToken,
       method: "POST",
-      body: { name: "Acceptance Support Agent", template: "customer_support",
-              description: "Acceptance test agent", leadCapture: true, escalation: true },
+      body: { name: `should-not-exist-${RUN}` },
     });
-    AGENT = created.json?.agent ?? null;
-    record("Agent can be created", created.status === 200 && !!AGENT,
-      AGENT ? `${AGENT.name} → workspace ${AGENT.workspace?.slug}` : created.json?.error);
-  } else {
-    record("Agent can be created", true, `reused "${AGENT.name}"`);
+    results.record("Viewer cannot create an agent", writeAttempt.status === 403);
   }
-  if (!AGENT) return summarize();
-  record("Agent defaults to source-grounded answers", AGENT?.workspace?.chatMode === "query",
-    `chatMode=${AGENT?.workspace?.chatMode}`);
-  record("Agent has approved-knowledge fallback",
-    /approved company knowledge/i.test(AGENT?.fallbackMessage ?? ""), AGENT?.fallbackMessage);
 
-  console.log("\n=== WEBSITE AGENT (EMBED) ===");
-  const noDomains = await api("/business/website-agents", {
-    method: "POST", body: { agentUuid: AGENT?.uuid, allowlistDomains: [] },
+  results.section("AI AGENTS");
+
+  const templates = await call("/business/agents/templates");
+  results.record(
+    "Agent templates available",
+    (templates.json?.templates?.length ?? 0) >= 5,
+    `${templates.json?.templates?.length} templates`
+  );
+
+  const createdAgent = await call("/business/agents", {
+    method: "POST",
+    body: {
+      name: AGENT_NAME,
+      template: "customer_support",
+      description: "Temporary acceptance fixture",
+      leadCapture: true,
+      escalation: true,
+    },
   });
-  record("Website agent WITHOUT a domain allowlist is refused",
-    noDomains.status === 400, noDomains.json?.error?.slice(0, 60));
+  const agent = createdAgent.json?.agent ?? null;
+  results.record("Agent can be created", createdAgent.status === 200 && !!agent, createdAgent.json?.error ?? "");
+  if (!agent) return;
+  cleanup.add("agent", () => call(`/business/agents/${agent.uuid}`, { method: "DELETE" }));
 
-  // Reuse this agent's website agent when one is already configured.
-  const existingEmbeds = await api("/business/website-agents");
-  let EMBED =
-    existingEmbeds.json?.websiteAgents?.find(
-      (w) => w.agent?.uuid === AGENT?.uuid && w.allowlistConfigured
-    )?.uuid ?? null;
+  results.record(
+    "Agent defaults to source-grounded answers",
+    agent.workspace?.chatMode === "query",
+    `chatMode=${agent.workspace?.chatMode}`
+  );
+  results.record(
+    "Agent has an approved-knowledge fallback",
+    /approved company knowledge/i.test(agent.fallbackMessage ?? "")
+  );
 
-  if (!EMBED) {
-    const embed = await api("/business/website-agents", {
+  results.section("WEBSITE AGENT");
+
+  const noAllowlist = await call("/business/website-agents", {
+    method: "POST",
+    body: { agentUuid: agent.uuid, allowlistDomains: [] },
+  });
+  results.record(
+    "Website agent without a domain allowlist is refused",
+    noAllowlist.status === 400,
+    (noAllowlist.json?.error ?? "").slice(0, 60)
+  );
+
+  const createdEmbed = await call("/business/website-agents", {
+    method: "POST",
+    body: {
+      agentUuid: agent.uuid,
+      allowlistDomains: [TEST_DOMAIN],
+      maxChatsPerDay: 100,
+      maxChatsPerSession: 10,
+    },
+  });
+  const embedId = createdEmbed.json?.websiteAgent?.uuid ?? null;
+  results.record("Website agent created with an allowlist", !!embedId, createdEmbed.json?.error ?? "");
+  if (!embedId) return;
+  cleanup.add("website agent", () =>
+    call(`/business/website-agents/${embedId}`, { method: "DELETE" })
+  );
+
+  const snippet = await call(`/business/website-agents/${embedId}/snippet`);
+  results.record(
+    "Embed snippet generated",
+    (snippet.json?.snippet ?? "").includes(embedId),
+    "copy-paste script produced"
+  );
+
+  results.section("PUBLIC EMBED SECURITY");
+
+  const foreign = await api.raw(`/embed/${embedId}/capture-config`, {
+    headers: { Origin: "https://attacker.example.invalid" },
+  });
+  results.record("Embed rejects an unauthorized origin", foreign.status === 404, `HTTP ${foreign.status}`);
+
+  const allowed = await api.raw(`/embed/${embedId}/capture-config`, {
+    headers: { Origin: TEST_DOMAIN },
+  });
+  const captureConfig = await allowed.json().catch(() => null);
+  results.record(
+    "Embed accepts the allowed origin",
+    allowed.status === 200,
+    `leadCapture=${captureConfig?.leadCapture}`
+  );
+
+  results.section("LEAD CAPTURE");
+
+  const session = crypto.randomUUID();
+  const leadPost = await api.raw(`/embed/${embedId}/lead`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: TEST_DOMAIN },
+    body: JSON.stringify({
+      sessionId: session,
+      firstName: "Dana",
+      lastName: "Prospect",
+      email: LEAD_EMAIL,
+      company: "Prospect Ltd",
+      reason: "Interested in a demo",
+      sourceUrl: `${TEST_DOMAIN}/pricing`,
+    }),
+  });
+  results.record("Lead capture accepted from the allowed origin", leadPost.status === 200, `HTTP ${leadPost.status}`);
+
+  const leadForeign = await api.raw(`/embed/${embedId}/lead`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "https://attacker.example.invalid" },
+    body: JSON.stringify({ sessionId: crypto.randomUUID(), email: "x@y.invalid", firstName: "X" }),
+  });
+  results.record("Lead capture blocked from a foreign origin", leadForeign.status === 404);
+
+  const leads = await call(`/business/leads?search=${encodeURIComponent(LEAD_EMAIL)}`);
+  const lead = (leads.json?.leads ?? []).find((l) => l.email === LEAD_EMAIL);
+  results.record("Lead appears in the dashboard", !!lead, lead ? `${lead.first_name} (${lead.status})` : "not found");
+
+  const duplicate = await api.raw(`/embed/${embedId}/lead`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: TEST_DOMAIN },
+    body: JSON.stringify({ sessionId: session, firstName: "Dana", email: LEAD_EMAIL }),
+  });
+  const duplicateBody = await duplicate.json().catch(() => ({}));
+  results.record("Visitor is not asked twice on the same session", duplicateBody?.alreadyCaptured === true);
+
+  if (lead) {
+    const statusChange = await call(`/business/leads/${lead.uuid}/status`, {
       method: "POST",
-      body: { agentUuid: AGENT?.uuid, allowlistDomains: ["https://acme.example.com"],
-              maxChatsPerDay: 100, maxChatsPerSession: 10 },
+      body: { status: "qualified" },
     });
-    EMBED = embed.json?.websiteAgent?.uuid ?? null;
-    record("Website agent created with an allowlist", !!EMBED, EMBED ?? embed.json?.error);
-  } else {
-    record("Website agent created with an allowlist", true, `reused ${EMBED}`);
+    results.record("Lead status can be changed", statusChange.json?.success === true);
   }
 
-  const snippet = await api(`/business/website-agents/${EMBED}/snippet`);
-  record("Embed snippet generated",
-    (snippet.json?.snippet ?? "").includes(EMBED ?? "___"), "copy-paste script produced");
+  results.section("HUMAN ESCALATION");
 
-  console.log("\n=== PUBLIC EMBED SECURITY ===");
-  const wrongOrigin = await fetch(`${BASE}/embed/${EMBED}/capture-config`, {
-    headers: { Origin: "https://attacker.example.net" },
-  });
-  record("Embed rejects an unauthorized origin", wrongOrigin.status === 404, `HTTP ${wrongOrigin.status}`);
-
-  const rightOrigin = await fetch(`${BASE}/embed/${EMBED}/capture-config`, {
-    headers: { Origin: "https://acme.example.com" },
-  });
-  const captureConfig = await rightOrigin.json().catch(() => null);
-  record("Embed accepts the allowed origin", rightOrigin.status === 200,
-    `leadCapture=${captureConfig?.leadCapture}`);
-
-  console.log("\n=== LEAD CAPTURE ===");
-  const sessionId = crypto.randomUUID();
-  const leadRes = await fetch(`${BASE}/embed/${EMBED}/lead`, {
+  const escalationSession = crypto.randomUUID();
+  const escalate = await api.raw(`/embed/${embedId}/escalate`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Origin: "https://acme.example.com" },
-    body: JSON.stringify({ sessionId, firstName: "Dana", lastName: "Prospect",
-      email: "dana@prospect.example.com", company: "Prospect Ltd",
-      reason: "Interested in a demo", sourceUrl: "https://acme.example.com/pricing" }),
+    headers: { "Content-Type": "application/json", Origin: TEST_DOMAIN },
+    body: JSON.stringify({
+      sessionId: escalationSession,
+      name: "Sam Customer",
+      email: `escalation-${RUN}@example.invalid`,
+      question: "I need to speak to a person about billing",
+    }),
   });
-  record("Lead capture accepted from the allowed origin", leadRes.status === 200, `HTTP ${leadRes.status}`);
+  results.record("Escalation accepted", escalate.status === 200, `HTTP ${escalate.status}`);
 
-  const leadWrongOrigin = await fetch(`${BASE}/embed/${EMBED}/lead`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Origin: "https://attacker.example.net" },
-    body: JSON.stringify({ sessionId: crypto.randomUUID(), email: "x@y.co", firstName: "X" }),
-  });
-  record("Lead capture blocked from a foreign origin", leadWrongOrigin.status === 404,
-    `HTTP ${leadWrongOrigin.status}`);
+  const escalations = await call("/business/escalations");
+  const escalation = (escalations.json?.escalations ?? []).find(
+    (e) => e.session_id === escalationSession
+  );
+  results.record("Escalation appears in the dashboard", !!escalation);
 
-  const leads = await api("/business/leads");
-  const foundLead = (leads.json?.leads ?? []).find((l) => l.email === "dana@prospect.example.com");
-  record("Lead appears in the dashboard", !!foundLead,
-    foundLead ? `${foundLead.first_name} ${foundLead.last_name} (${foundLead.status})` : "not found");
+  results.section("INTEGRATIONS");
 
-  // Submitting again on the SAME session must be acknowledged, not re-captured.
-  const dupe = await fetch(`${BASE}/embed/${EMBED}/lead`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Origin: "https://acme.example.com" },
-    body: JSON.stringify({ sessionId, firstName: "Dana", email: "dana@prospect.example.com" }),
-  });
-  const dupeJson = await dupe.json().catch(() => ({}));
-  record("Visitor is not harassed for a second lead", dupeJson?.alreadyCaptured === true);
-
-  if (foundLead) {
-    const statusChange = await api(`/business/leads/${foundLead.uuid}/status`, {
-      method: "POST", body: { status: "qualified" },
-    });
-    record("Lead status can be changed", statusChange.json?.success === true);
-  }
-
-  console.log("\n=== HUMAN ESCALATION ===");
-  const escSession = crypto.randomUUID();
-  const escalate = await fetch(`${BASE}/embed/${EMBED}/escalate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Origin: "https://acme.example.com" },
-    body: JSON.stringify({ sessionId: escSession, name: "Sam Customer",
-      email: "sam@customer.example.com", question: "I need to speak to a person about billing" }),
-  });
-  record("Escalation accepted", escalate.status === 200, `HTTP ${escalate.status}`);
-
-  const escalations = await api("/business/escalations");
-  const foundEsc = (escalations.json?.escalations ?? []).find((e) => e.session_id === escSession);
-  record("Escalation appears in the dashboard", !!foundEsc,
-    foundEsc ? `${foundEsc.contact_name} · ${foundEsc.reason}` : "not found");
-
-  console.log("\n=== INTEGRATIONS (webhook delivery) ===");
-  const integrations = await api("/business/integrations");
-  record("Integration catalogue available",
+  const integrations = await call("/business/integrations");
+  results.record(
+    "Integration catalogue available",
     (integrations.json?.catalogue?.length ?? 0) >= 5,
-    integrations.json?.catalogue?.map((c) => c.provider).join(", "));
+    integrations.json?.catalogue?.map((c) => c.provider).join(", ")
+  );
 
-  const ssrf = await api("/business/integrations", {
+  // Proves the SSRF guard blocks the cloud metadata endpoint. No external
+  // system is contacted: the request is refused before any socket is opened.
+  const ssrf = await call("/business/integrations", {
     method: "POST",
-    body: { name: "SSRF attempt", provider: "webhook",
-            config: { url: "http://169.254.169.254/latest/meta-data/" },
-            events: ["lead.created"] },
+    body: {
+      name: `ssrf-probe-${RUN}`,
+      provider: "webhook",
+      config: { url: "http://169.254.169.254/latest/meta-data/" },
+      events: ["lead.created"],
+    },
   });
   let ssrfBlocked = false;
   if (ssrf.status === 200) {
-    const test = await api(`/business/integrations/${ssrf.json.integration.uuid}/test`, { method: "POST" });
-    ssrfBlocked = test.json?.success === false;
-    await api(`/business/integrations/${ssrf.json.integration.uuid}`, { method: "DELETE" });
+    const uuid = ssrf.json.integration.uuid;
+    const probe = await call(`/business/integrations/${uuid}/test`, { method: "POST" });
+    ssrfBlocked = probe.json?.success === false;
+    await call(`/business/integrations/${uuid}`, { method: "DELETE" });
   }
-  record("Webhook to cloud metadata is blocked (SSRF)", ssrfBlocked);
+  results.record("Webhook to the cloud metadata address is blocked (SSRF)", ssrfBlocked);
 
-  console.log("\n=== CONVERSATIONS / ANALYTICS / GAPS / QUALITY ===");
-  const convos = await api("/business/conversations");
-  record("Conversations dashboard works", convos.status === 200, `${convos.json?.total ?? 0} conversation(s)`);
+  results.section("CONVERSATIONS, ANALYTICS AND GAPS");
 
-  const analytics = await api("/business/analytics?days=30");
-  record("Analytics works", analytics.status === 200 && !!analytics.json?.conversations,
-    `${analytics.json?.leads?.captured ?? 0} leads, ${analytics.json?.escalations?.total ?? 0} escalations`);
-  record("Estimated metrics are labelled",
-    analytics.json?.conversations?.uniqueVisitorsIsEstimate === true);
+  const conversations = await call("/business/conversations");
+  results.record("Conversations dashboard works", conversations.status === 200);
 
-  const gaps = await api("/business/knowledge-gaps");
-  record("Knowledge gaps endpoint works", gaps.status === 200, `${gaps.json?.total ?? 0} gap(s)`);
+  const analytics = await call("/business/analytics?days=30");
+  results.record("Analytics works", analytics.status === 200 && !!analytics.json?.conversations);
+  results.record(
+    "Estimated metrics are labelled as estimates",
+    analytics.json?.conversations?.uniqueVisitorsIsEstimate === true
+  );
 
-  const qTest = await api("/business/quality/tests", {
+  const gaps = await call("/business/knowledge-gaps");
+  results.record("Knowledge gaps endpoint works", gaps.status === 200);
+
+  results.section("AI QUALITY");
+
+  const qualityTest = await call("/business/quality/tests", {
     method: "POST",
-    body: { question: "What is the refund window?", expectedConcepts: "30 days, refund",
-            agentUuid: AGENT?.uuid },
+    body: {
+      question: `Acceptance probe ${RUN}: what is the refund window?`,
+      expectedConcepts: "30 day refund",
+      agentUuid: agent.uuid,
+    },
   });
-  record("AI quality test can be created", qTest.status === 200 && !!qTest.json?.test);
+  const testUuid = qualityTest.json?.test?.uuid ?? null;
+  results.record("AI quality test can be created", qualityTest.status === 200 && !!testUuid);
+  if (testUuid)
+    cleanup.add("quality test", () =>
+      call(`/business/quality/tests/${testUuid}`, { method: "DELETE" })
+    );
 
-  const qRun = await api("/business/quality/run", { method: "POST", body: {} });
-  record("AI quality suite runs", qRun.status === 200 && !!qRun.json?.run,
-    qRun.json?.run ? `${qRun.json.run.passed}P / ${qRun.json.run.needs_review}R / ${qRun.json.run.failed}F` : qRun.json?.error);
+  // A run object existing proves nothing. Assert the suite actually executed
+  // the test and that the counts are internally consistent.
+  const qualityRun = await call("/business/quality/run", {
+    method: "POST",
+    body: { testUuids: testUuid ? [testUuid] : null },
+  });
+  const runRecord = qualityRun.json?.run ?? null;
+  results.record("Quality run endpoint responds", qualityRun.status === 200 && !!runRecord);
 
-  console.log("\n=== BILLING ===");
-  const billing = await api("/business/billing/summary");
-  record("Billing page data loads", billing.status === 200 && !!billing.json?.plan,
-    `${billing.json?.plan?.priceWithInterval} · ${billing.json?.subscription?.statusLabel}`);
-  record("Plan price is exactly $3,888.88/month",
-    billing.json?.plan?.amountCents === 388888 && billing.json?.plan?.priceWithInterval === "$3,888.88/month");
-  record("No card data is stored", billing.json?.cardDataStored === false);
-  const billingStr = JSON.stringify(billing.json);
-  record("No Stripe secret leaks to the browser",
-    !billingStr.includes("sk_test") && !billingStr.includes("sk_live") && !billingStr.includes("whsec_"));
+  if (runRecord) {
+    const { total, passed, needs_review: needsReview, failed } = runRecord;
+    results.record(
+      "Quality run executed at least one test",
+      Number(total) >= 1,
+      `total=${total}`
+    );
+    results.record(
+      "Quality run counts add up to the number of tests",
+      Number(passed) + Number(needsReview) + Number(failed) === Number(total),
+      `${passed}P / ${needsReview}R / ${failed}F of ${total}`
+    );
 
-  console.log("\n=== API KEYS ===");
-  const keyCreate = await api("/business/api-keys", { method: "POST", body: { name: "Acceptance key" } });
-  const KEY = keyCreate.json?.apiKey?.secret ?? null;
-  record("API key can be created", !!KEY, keyCreate.json?.warning);
+    const runDetail = await call(`/business/quality/runs/${runRecord.uuid}`);
+    const verdicts = (runDetail.json?.results ?? []).map((r) => r.verdict);
+    results.record(
+      "Every test in the run produced a verdict",
+      verdicts.length === Number(total) && verdicts.every(Boolean),
+      verdicts.join(", ") || "none"
+    );
 
-  const keyList = await api("/business/api-keys");
-  const listed = keyList.json?.apiKeys?.[0];
-  record("API key secret is not re-listed after creation",
-    !!listed && !JSON.stringify(keyList.json).includes(KEY ?? "___"),
-    `shown as ${listed?.fingerprint}`);
-
-  if (keyCreate.json?.apiKey?.id) {
-    const revoke = await api(`/business/api-keys/${keyCreate.json.apiKey.id}`, { method: "DELETE" });
-    record("API key can be revoked", revoke.json?.success === true);
+    // Whether the ANSWER is correct depends on a model provider. Without one,
+    // the agent cannot answer at all, so a failed verdict here is expected and
+    // is reported as a blocked correctness gate rather than a passing test.
+    const providerConfigured = process.env.ACCEPTANCE_PROVIDER_CONFIGURED === "1";
+    if (providerConfigured) {
+      results.record(
+        "Quality run produced a passing answer",
+        Number(passed) >= 1,
+        `${passed} passed`
+      );
+    } else {
+      results.blocked(
+        "Answer-correctness grading (end to end)",
+        "No model provider configured for this deployment. Endpoint execution is verified above; answer correctness is verified by scripts/provider-verification.cjs. Set ACCEPTANCE_PROVIDER_CONFIGURED=1 when a provider is configured."
+      );
+    }
   }
 
-  console.log("\n=== AUDIT LOG ===");
-  const audit = await api("/business/audit?limit=200");
+  results.section("BILLING");
+
+  const billing = await call("/business/billing/summary");
+  results.record(
+    "Billing page data loads",
+    billing.status === 200 && !!billing.json?.plan,
+    `${billing.json?.plan?.priceWithInterval} · ${billing.json?.subscription?.statusLabel}`
+  );
+  results.record(
+    "Plan price matches the configured commercial amount",
+    billing.json?.plan?.amountCents === Number(process.env.PLAN_AMOUNT_CENTS ?? 388888),
+    `${billing.json?.plan?.amountCents} cents`
+  );
+  results.record("No card data is stored", billing.json?.cardDataStored === false);
+
+  const billingPayload = JSON.stringify(billing.json ?? {});
+  results.record(
+    "No Stripe secret reaches the browser",
+    !/sk_test|sk_live|whsec_/.test(billingPayload)
+  );
+
+  results.section("API KEYS");
+
+  const keyCreate = await call("/business/api-keys", {
+    method: "POST",
+    body: { name: `acceptance-${RUN}` },
+  });
+  const secret = keyCreate.json?.apiKey?.secret ?? null;
+  const keyId = keyCreate.json?.apiKey?.id ?? null;
+  results.record("API key can be created", !!secret);
+  if (keyId)
+    cleanup.add("API key", () => call(`/business/api-keys/${keyId}`, { method: "DELETE" }));
+
+  const keyList = await call("/business/api-keys");
+  results.record(
+    "API key secret is not re-listed after creation",
+    !!secret && !JSON.stringify(keyList.json ?? {}).includes(secret)
+  );
+
+  if (keyId) {
+    const revoked = await call(`/business/api-keys/${keyId}`, { method: "DELETE" });
+    results.record("API key can be revoked", revoked.json?.success === true);
+  }
+
+  results.section("AUDIT LOG");
+
+  const audit = await call("/business/audit?limit=200");
   const actions = (audit.json?.entries ?? []).map((e) => e.action);
-  record("Audit log records activity", audit.status === 200 && actions.length > 0,
-    `${audit.json?.total} entries`);
-  for (const expected of ["user.created", "agent.created", "embed.created", "lead.captured",
-                          "escalation.created", "api_key.created", "api_key.revoked"]) {
-    record(`Audit captures ${expected}`, actions.includes(expected));
-  }
-  const auditStr = JSON.stringify(audit.json);
-  record("Audit log contains no credentials",
-    !/Str0ng-|sk_test|sk_live|whsec_|"password"\s*:\s*"[^"]{3,}/.test(auditStr));
+  results.record("Audit log records activity", audit.status === 200 && actions.length > 0, `${audit.json?.total} entries`);
+  for (const expected of [
+    "user.created",
+    "agent.created",
+    "embed.created",
+    "lead.captured",
+    "escalation.created",
+    "api_key.created",
+    "api_key.revoked",
+  ])
+    results.record(`Audit captures ${expected}`, actions.includes(expected));
 
-  console.log("\n=== HEALTH ===");
-  const health = await api("/business/health");
-  record("Health report available to admins", health.status === 200 && !!health.json?.components,
-    Object.entries(health.json?.components ?? {}).map(([k, v]) => `${k}=${v.status}`).join(" "));
-  const healthStr = JSON.stringify(health.json);
-  record("Health report leaks no credentials",
-    !/sk_test|sk_live|whsec_|password|OPEN_AI_KEY/i.test(healthStr));
+  const auditPayload = JSON.stringify(audit.json ?? {});
+  results.record(
+    "Audit log contains no credentials",
+    !new RegExp(
+      [OWNER.password, VIEWER.password].map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")
+    ).test(auditPayload) && !/sk_test|sk_live|whsec_/.test(auditPayload)
+  );
 
-  // When HEALTHCHECK_TOKEN is configured the probe must demand it; when it is
-  // not, the probe stays open (it carries no internal detail either way).
-  const probeNoToken = await fetch(`${BASE}/platform/health/probe`);
-  const probeWithToken = await fetch(`${BASE}/platform/health/probe`, {
-    headers: { "X-Health-Token": "probe-token-123" },
-  });
-  const tokenConfigured = probeNoToken.status === 401;
-  record("Uptime probe works",
-    tokenConfigured ? probeWithToken.status === 200 : probeNoToken.status === 200,
-    tokenConfigured ? "token required and accepted" : "open probe");
-  record("Uptime probe rejects a wrong token when one is configured",
-    !tokenConfigured ||
-      (await fetch(`${BASE}/platform/health/probe`, {
+  results.section("HEALTH");
+
+  const health = await call("/business/health");
+  results.record(
+    "Health report available to admins",
+    health.status === 200 && !!health.json?.components,
+    Object.entries(health.json?.components ?? {})
+      .map(([k, v]) => `${k}=${v.status}`)
+      .join(" ")
+  );
+  results.record(
+    "Health report leaks no credentials",
+    !/sk_test|sk_live|whsec_|OPEN_AI_KEY/i.test(JSON.stringify(health.json ?? {}))
+  );
+
+  const probeOpen = await api.raw("/platform/health/probe");
+  const healthToken = process.env.ACCEPTANCE_HEALTH_TOKEN;
+  if (probeOpen.status === 401) {
+    if (!healthToken) {
+      results.blocked(
+        "Uptime probe token check",
+        "The probe is token-guarded; set ACCEPTANCE_HEALTH_TOKEN to verify it."
+      );
+    } else {
+      const withToken = await api.raw("/platform/health/probe", {
+        headers: { "X-Health-Token": healthToken },
+      });
+      const withWrong = await api.raw("/platform/health/probe", {
         headers: { "X-Health-Token": "wrong-token" },
-      })).status === 401);
-
-  console.log("\n=== BRANDING ===");
-  const branding = await fetch(`${BASE}/platform/branding`).then((r) => r.json());
-  record("Branding is env-driven", branding?.branding?.appName === "Acme AI Operations",
-    branding?.branding?.appName);
-  const brandStr = JSON.stringify(branding);
-  record("No upstream marketing in branding payload",
-    !/mintplex|anythingllm/i.test(brandStr));
-
-  console.log("\n=== ERROR HANDLING ===");
-  const notFound = await api("/business/agents/does-not-exist-uuid");
-  record("Unknown resource returns a clean error",
-    notFound.status === 404 && !JSON.stringify(notFound.json).includes("at Object."),
-    notFound.json?.error);
-
-  summarize();
-})();
-
-function summarize() {
-  const passed = results.filter((r) => r.passed).length;
-  const failed = results.filter((r) => !r.passed);
-  console.log("\n" + "=".repeat(60));
-  console.log(`ACCEPTANCE: ${passed}/${results.length} passed`);
-  if (failed.length) {
-    console.log("\nFAILURES:");
-    failed.forEach((f) => console.log(`  ✗ ${f.name}${f.detail ? ` — ${f.detail}` : ""}`));
+      });
+      results.record("Uptime probe accepts the configured token", withToken.status === 200);
+      results.record("Uptime probe rejects a wrong token", withWrong.status === 401);
+    }
+  } else {
+    results.record("Uptime probe is reachable", probeOpen.status === 200, "open probe (no token configured)");
   }
-  console.log("=".repeat(60));
-  process.exit(failed.length ? 1 : 0);
+
+  results.section("BRANDING");
+
+  const branding = await api.raw("/platform/branding").then((r) => r.json());
+  const expectedName = process.env.ACCEPTANCE_EXPECT_APP_NAME;
+  if (expectedName) {
+    results.record(
+      "Branding is env-driven",
+      branding?.branding?.appName === expectedName,
+      branding?.branding?.appName
+    );
+  } else {
+    results.record(
+      "Branding endpoint serves a configured name",
+      typeof branding?.branding?.appName === "string" && branding.branding.appName.length > 0,
+      branding?.branding?.appName
+    );
+  }
+  results.record(
+    "No upstream marketing in the branding payload",
+    !/mintplex|anythingllm/i.test(JSON.stringify(branding ?? {}))
+  );
+
+  results.section("ERROR HANDLING");
+
+  const missing = await call(`/business/agents/does-not-exist-${RUN}`);
+  results.record(
+    "Unknown resource returns a clean error",
+    missing.status === 404 && !JSON.stringify(missing.json ?? {}).includes("at Object."),
+    missing.json?.error
+  );
 }

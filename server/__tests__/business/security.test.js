@@ -184,6 +184,98 @@ describe("production authentication enforcement", () => {
   });
 });
 
+describe("authenticated-mode guard cache", () => {
+  /**
+   * Regression: a cached "multi-user mode is off" kept blocking every request
+   * after an operator finished setup, so a freshly provisioned deployment
+   * looked broken for the first seconds of its life. Only a positive result
+   * may be cached.
+   */
+  const request = { path: "/workspaces", method: "GET" };
+
+  function response() {
+    return {
+      code: null,
+      status(value) {
+        this.code = value;
+        return this;
+      },
+      json() {
+        return this;
+      },
+      sendStatus(value) {
+        this.code = value;
+        return this;
+      },
+    };
+  }
+
+  let previousEnv;
+  let previousToken;
+
+  beforeEach(() => {
+    previousEnv = process.env.NODE_ENV;
+    previousToken = process.env.AUTH_TOKEN;
+    process.env.NODE_ENV = "production";
+    delete process.env.AUTH_TOKEN;
+    jest.resetModules();
+  });
+
+  afterEach(() => {
+    process.env.NODE_ENV = previousEnv;
+    if (previousToken !== undefined) process.env.AUTH_TOKEN = previousToken;
+    else delete process.env.AUTH_TOKEN;
+    jest.resetModules();
+  });
+
+  it("opens as soon as multi-user mode is enabled, with no stale-negative delay", async () => {
+    let mode = false;
+    jest.doMock("../../models/systemSettings", () => ({
+      SystemSettings: { isMultiUserMode: async () => mode },
+    }));
+    const {
+      requireAuthenticatedMode,
+    } = require("../../business/middleware/requireAuthenticatedMode");
+
+    const blocked = response();
+    let passedWhileOff = false;
+    await requireAuthenticatedMode(request, blocked, () => {
+      passedWhileOff = true;
+    });
+    expect(passedWhileOff).toBe(false);
+    expect(blocked.code).toBe(401);
+
+    // No wait: the very next request after setup must be allowed through.
+    mode = true;
+    const allowed = response();
+    let passedAfterSetup = false;
+    await requireAuthenticatedMode(request, allowed, () => {
+      passedAfterSetup = true;
+    });
+    expect(passedAfterSetup).toBe(true);
+  });
+
+  it("caches the positive result so the lookup is not repeated per request", async () => {
+    let reads = 0;
+    jest.doMock("../../models/systemSettings", () => ({
+      SystemSettings: {
+        isMultiUserMode: async () => {
+          reads += 1;
+          return true;
+        },
+      },
+    }));
+    const {
+      requireAuthenticatedMode,
+    } = require("../../business/middleware/requireAuthenticatedMode");
+
+    for (let i = 0; i < 5; i += 1)
+      await requireAuthenticatedMode(request, response(), () => {});
+
+    expect(reads).toBe(1);
+  });
+});
+
 describe("boot posture checks", () => {
   const { evaluatePosture, isWeakSecret } = require("../../business/boot");
 

@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require("uuid");
 const prisma = require("../../utils/prisma");
 const { AuditLog } = require("../models/audit");
+const grading = require("./answerGrading");
 
 /**
  * AI Quality test centre.
@@ -22,8 +23,9 @@ const VERDICTS = Object.freeze({
   FAILED: "failed",
 });
 
-const PASS_THRESHOLD = 1.0; // all concepts
-const REVIEW_THRESHOLD = 0.6; // most concepts
+// A concept is either satisfied inside one clause or it is not; partial
+// credit only decides between "needs review" and "failed" for omissions.
+const REVIEW_THRESHOLD = 0.6;
 
 function parseConcepts(value) {
   if (!value) return [];
@@ -43,29 +45,19 @@ function parseConcepts(value) {
 }
 
 /**
- * Checks a concept against an answer. A concept matches when all of its
- * significant words appear in the answer, so "30 day refund" matches
- * "refunds are available for 30 days" without demanding an exact phrase.
- */
-function conceptPresent(answer, concept) {
-  const haystack = String(answer ?? "").toLowerCase();
-  const words = String(concept)
-    .toLowerCase()
-    .replace(/[^a-z0-9\s%$.-]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 1);
-
-  if (!words.length) return false;
-  return words.every((word) => haystack.includes(word));
-}
-
-/**
- * Grades a single answer.
- * @returns {{verdict: string, score: number, detail: string}}
+ * Grades one answer against the expected facts.
+ *
+ * Matching is delegated to the clause-aware grader in ./answerGrading, which
+ * compares numbers as whole tokens, requires each concept to be satisfied
+ * inside a single clause, and reports a negated clause as a contradiction
+ * rather than a match. No model call is made to grade.
+ *
+ * @returns {{verdict: string, score: number, detail: string, findings: object[]}}
  */
 function grade({
   answer,
   concepts = [],
+  expectedAnswer = null,
   requiredSource = null,
   sources = [],
   errored = false,
@@ -75,6 +67,7 @@ function grade({
       verdict: VERDICTS.FAILED,
       score: 0,
       detail: "The agent returned an error.",
+      findings: [],
     };
 
   const text = String(answer ?? "").trim();
@@ -83,6 +76,7 @@ function grade({
       verdict: VERDICTS.FAILED,
       score: 0,
       detail: "The agent returned an empty answer.",
+      findings: [],
     };
 
   const { looksLikeRefusal } = require("./knowledgeGaps").KnowledgeGaps;
@@ -91,11 +85,43 @@ function grade({
       verdict: VERDICTS.FAILED,
       score: 0,
       detail: "The agent could not answer from the approved knowledge.",
+      findings: [],
     };
 
-  const expected = parseConcepts(concepts);
-  const matched = expected.filter((concept) => conceptPresent(text, concept));
+  // Explicit concepts are the contract. When none are given but an expected
+  // answer is, the checkable facts are derived from it rather than ignored.
+  let expected = parseConcepts(concepts);
+  let derivedFromExpectedAnswer = false;
+  if (!expected.length && expectedAnswer) {
+    expected = grading.conceptsFromExpectedAnswer(expectedAnswer);
+    derivedFromExpectedAnswer = expected.length > 0;
+  }
+
+  const clauses = grading.splitClauses(text);
+  const findings = expected.map((concept) => ({
+    concept,
+    ...grading.evaluateConcept(concept, clauses),
+  }));
+
+  const matched = findings.filter((f) => f.status === "matched");
+  const contradicted = findings.filter((f) => f.status === "contradicted");
+  const numericMismatch = findings.filter(
+    (f) => f.status === "numeric_mismatch"
+  );
+  const missing = findings.filter((f) => f.status === "missing");
   const score = expected.length ? matched.length / expected.length : 1;
+
+  // A stated-but-wrong fact is worse than an omission: a customer acting on it
+  // is actively misinformed. These fail outright regardless of the score.
+  if (contradicted.length || numericMismatch.length) {
+    const reasons = [...contradicted, ...numericMismatch].map((f) => f.reason);
+    return {
+      verdict: VERDICTS.FAILED,
+      score,
+      detail: reasons.join(" "),
+      findings,
+    };
+  }
 
   const sourceNames = (sources ?? [])
     .map((s) => String(s?.title ?? s?.metadata?.title ?? s?.name ?? ""))
@@ -106,45 +132,46 @@ function grade({
       )
     : true;
 
-  const missing = expected.filter((c) => !matched.includes(c));
+  if (!missing.length) {
+    if (!sourceSatisfied)
+      return {
+        verdict: VERDICTS.NEEDS_REVIEW,
+        score,
+        detail: `Every expected fact is present, but the required source "${requiredSource}" was not cited.`,
+        findings,
+      };
 
-  if (score >= PASS_THRESHOLD && sourceSatisfied)
     return {
       verdict: VERDICTS.PASSED,
       score,
       detail: expected.length
-        ? `All ${expected.length} expected concept(s) present.`
+        ? `All ${expected.length} expected fact(s) present and consistent${
+            derivedFromExpectedAnswer
+              ? " (derived from the expected answer)"
+              : ""
+          }.`
         : "Answer produced.",
+      findings,
     };
+  }
 
-  if (score >= PASS_THRESHOLD && !sourceSatisfied)
-    return {
-      verdict: VERDICTS.NEEDS_REVIEW,
-      score,
-      detail: `Concepts present, but the required source "${requiredSource}" was not cited.`,
-    };
-
+  const missingDetail = missing.map((f) => f.reason).join(" ");
   if (score >= REVIEW_THRESHOLD)
     return {
       verdict: VERDICTS.NEEDS_REVIEW,
       score,
-      detail: `Missing concept(s): ${missing.join(", ")}.`,
+      detail: missingDetail,
+      findings,
     };
 
-  return {
-    verdict: VERDICTS.FAILED,
-    score,
-    detail: expected.length
-      ? `Missing concept(s): ${missing.join(", ")}.`
-      : "Answer did not meet expectations.",
-  };
+  return { verdict: VERDICTS.FAILED, score, detail: missingDetail, findings };
 }
 
 const AIQuality = {
   VERDICTS,
   grade,
-  conceptPresent,
   parseConcepts,
+  grading,
 
   createTest: async function (params = {}) {
     const question = String(params.question ?? "").trim();
@@ -320,6 +347,7 @@ const AIQuality = {
       const verdict = grade({
         answer,
         concepts: test.expected_concepts,
+        expectedAnswer: test.expected_answer,
         requiredSource: test.required_source,
         sources,
       });

@@ -5,16 +5,46 @@ const { v4 } = require("uuid");
 const { normalizePath, sanitizeFileName } = require(".");
 
 /**
+ * Resolves the directory uploads are staged in for the document processor.
+ *
+ * The path was previously derived from STORAGE_DIR as `../../collector/hotdir`,
+ * which silently breaks whenever storage is not laid out as
+ * `<app>/server/storage` - for example when an operator mounts storage on its
+ * own volume, or when a disposable test run uses a temporary directory. The
+ * upload then fails with an ENOENT naming a directory nobody configured.
+ *
+ * COLLECTOR_HOTDIR makes it explicit. The previous derivation remains the
+ * default, so existing deployments are unaffected.
+ *
+ * @returns {string} an existing directory to stage uploads in
+ */
+function resolveHotDir() {
+  const configured = process.env.COLLECTOR_HOTDIR;
+  const hotDir = configured
+    ? path.resolve(configured)
+    : process.env.NODE_ENV === "development"
+      ? path.resolve(__dirname, `../../../collector/hotdir`)
+      : path.resolve(process.env.STORAGE_DIR, `../../collector/hotdir`);
+
+  // Create it rather than failing the upload: the directory is a staging area,
+  // not state, and an operator should not have to pre-create it.
+  try {
+    fs.mkdirSync(hotDir, { recursive: true });
+  } catch (error) {
+    console.error(
+      `[multer] Could not create the document staging directory at ${hotDir}: ${error.message}`
+    );
+  }
+  return hotDir;
+}
+
+/**
  * Handle File uploads for auto-uploading.
  * Mostly used for internal GUI/API uploads.
  */
 const fileUploadStorage = multer.diskStorage({
   destination: function (_, __, cb) {
-    const uploadOutput =
-      process.env.NODE_ENV === "development"
-        ? path.resolve(__dirname, `../../../collector/hotdir`)
-        : path.resolve(process.env.STORAGE_DIR, `../../collector/hotdir`);
-    cb(null, uploadOutput);
+    cb(null, resolveHotDir());
   },
   filename: function (_, file, cb) {
     file.originalname = sanitizeFileName(
@@ -30,11 +60,7 @@ const fileUploadStorage = multer.diskStorage({
  */
 const fileAPIUploadStorage = multer.diskStorage({
   destination: function (_, __, cb) {
-    const uploadOutput =
-      process.env.NODE_ENV === "development"
-        ? path.resolve(__dirname, `../../../collector/hotdir`)
-        : path.resolve(process.env.STORAGE_DIR, `../../collector/hotdir`);
-    cb(null, uploadOutput);
+    cb(null, resolveHotDir());
   },
   filename: function (_, file, cb) {
     file.originalname = sanitizeFileName(

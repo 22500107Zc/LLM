@@ -109,10 +109,10 @@ describe("knowledge gap detection", () => {
 describe("AI quality grading", () => {
   const { AIQuality, VERDICTS } = require("../../business/services/aiQuality");
 
-  it("passes when every expected concept is present", () => {
+  it("passes when every expected concept is present in its own clause", () => {
     const result = AIQuality.grade({
       answer: "Refunds are available for 30 days after purchase with a receipt.",
-      concepts: ["30 days", "refund", "receipt"],
+      concepts: ["30 days refund", "receipt"],
     });
     expect(result.verdict).toBe(VERDICTS.PASSED);
     expect(result.score).toBe(1);
@@ -129,7 +129,7 @@ describe("AI quality grading", () => {
   it("needs review when concepts are present but a required source was not cited", () => {
     const result = AIQuality.grade({
       answer: "Refunds take 30 days.",
-      concepts: ["30 days", "refund"],
+      concepts: ["30 days refund"],
       requiredSource: "Refund Policy.pdf",
       sources: [{ title: "Shipping.pdf" }],
     });
@@ -139,7 +139,7 @@ describe("AI quality grading", () => {
   it("passes when the required source is cited", () => {
     const result = AIQuality.grade({
       answer: "Refunds take 30 days.",
-      concepts: ["30 days", "refund"],
+      concepts: ["30 days refund"],
       requiredSource: "Refund Policy",
       sources: [{ title: "Refund Policy.pdf" }],
     });
@@ -164,11 +164,39 @@ describe("AI quality grading", () => {
     );
   });
 
-  it("matches concepts word-wise rather than as exact phrases", () => {
+  it("matches a concept by its facts rather than as an exact phrase", () => {
+    // Clause-aware matching lives in answerGrading.test.js; this guards the
+    // basic through-the-grader behaviour the business logic depends on.
     expect(
-      AIQuality.conceptPresent("refunds are issued within 30 days", "30 day refund")
-    ).toBe(true);
-    expect(AIQuality.conceptPresent("we ship worldwide", "30 day refund")).toBe(false);
+      AIQuality.grade({
+        answer: "Refunds are issued within 30 days.",
+        concepts: ["30 day refund"],
+      }).verdict
+    ).toBe(VERDICTS.PASSED);
+    expect(
+      AIQuality.grade({
+        answer: "We ship worldwide.",
+        concepts: ["30 day refund"],
+      }).verdict
+    ).toBe(VERDICTS.FAILED);
+  });
+
+  it("fails a negated answer that contains every concept word", () => {
+    expect(
+      AIQuality.grade({
+        answer: "Refunds are NOT available within 30 days.",
+        concepts: ["30 day refund"],
+      }).verdict
+    ).toBe(VERDICTS.FAILED);
+  });
+
+  it("fails a numerically wrong answer", () => {
+    expect(
+      AIQuality.grade({
+        answer: "Refunds are available within 300 days.",
+        concepts: ["30 day refund"],
+      }).verdict
+    ).toBe(VERDICTS.FAILED);
   });
 
   it("parses concepts from an array, JSON or a delimited string", () => {
