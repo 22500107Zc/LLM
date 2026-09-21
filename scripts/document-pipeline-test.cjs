@@ -40,6 +40,7 @@ const {
   ensureFixtures,
   PDF_FACTS,
   DOCX_FACTS,
+  PPTX_FACTS,
   ABSENT_FACT_QUESTION,
 } = require("./lib/fixtures.cjs");
 
@@ -87,8 +88,12 @@ async function run() {
   if (!token) return;
   api.setToken(token);
 
-  const { pdfPath, docxPath } = await ensureFixtures(FIXTURE_DIR);
-  results.record("Fixtures available", fs.existsSync(pdfPath) && fs.existsSync(docxPath), FIXTURE_DIR);
+  const { pdfPath, docxPath, pptxPath } = await ensureFixtures(FIXTURE_DIR);
+  results.record(
+    "Fixtures available",
+    [pdfPath, docxPath, pptxPath].every((f) => fs.existsSync(f)),
+    FIXTURE_DIR
+  );
 
   results.section("AGENT SETUP");
 
@@ -110,6 +115,16 @@ async function run() {
   );
   results.record("DOCX upload accepted", docxUpload.ok, docxUpload.error ?? "");
 
+  // Presentations go through a third parser (officeparser), so they are
+  // covered separately rather than assumed to work because DOCX does.
+  const pptxUpload = await upload(
+    agentA.workspace.slug,
+    pptxPath,
+    PPTX_FACTS.filename,
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  );
+  results.record("PPTX upload accepted", pptxUpload.ok, pptxUpload.error ?? "");
+
   results.section("EMBEDDING");
 
   const available = await call("/business/knowledge/available");
@@ -117,8 +132,9 @@ async function run() {
   const mine = [
     paths.filter((p) => p.includes(PDF_FACTS.filename)).pop(),
     paths.filter((p) => p.includes(DOCX_FACTS.filename)).pop(),
+    paths.filter((p) => p.includes(PPTX_FACTS.filename)).pop(),
   ].filter(Boolean);
-  results.record("Parsed documents available to attach", mine.length === 2);
+  results.record("Parsed documents available to attach", mine.length === 3, `${mine.length} of 3`);
 
   const assign = await call("/business/knowledge/assign", {
     method: "POST",
@@ -140,6 +156,7 @@ async function run() {
   const titles = (knowledge.json?.documents ?? []).map((d) => d.title);
   results.record("PDF is listed in Knowledge", titles.some((t) => t.includes(PDF_FACTS.filename)));
   results.record("DOCX is listed in Knowledge", titles.some((t) => t.includes(DOCX_FACTS.filename)));
+  results.record("PPTX is listed in Knowledge", titles.some((t) => t.includes(PPTX_FACTS.filename)));
   results.record(
     "Processing status is reported",
     (knowledge.json?.documents ?? []).every((d) => d.status === "processed"),
@@ -169,6 +186,13 @@ async function run() {
 
   const hours = await search(VectorDb, retriever, namespaceA, DOCX_FACTS.question);
   results.record("Retrieval finds the DOCX passage", /5pm/i.test(hours.text), hours.titles.join(", "));
+
+  const onboarding = await search(VectorDb, retriever, namespaceA, PPTX_FACTS.question);
+  results.record(
+    "Retrieval finds the PPTX passage",
+    /14 days/i.test(onboarding.text),
+    onboarding.titles.join(", ")
+  );
 
   results.section("NAMESPACE ISOLATION");
 

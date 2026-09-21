@@ -34,11 +34,11 @@
     "moment": "^2.29.4",
     "node-html-parser": "^6.1.13",
     "node-xlsx": "^0.24.0",
-    "officeparser": "^4.0.5",
+    "officeparser": "5.1.1",
     "openai": "4.95.1",
     "pdf-parse": "^1.1.1",
     "puppeteer": "~21.5.2",
-    "sharp": "^0.33.5",
+    "sharp": "^0.35.4",
     "slugify": "^1.6.6",
     "strip-ansi": "^7.1.2",
     "tesseract.js": "^6.0.0",
@@ -63,6 +63,21 @@
   },
   "resolutions": {
     "string-width": "^4.2.3",
-    "wrap-ansi": "^7.0.0"
+    "wrap-ansi": "^7.0.0",
+    "basic-ftp": "^5.2.0",
+    "**/onnx-proto/protobufjs": "^7.5.5",
+    "@xmldom/xmldom": "^0.8.15",
+    "epub2/adm-zip": "^0.6.1",
+    "form-data": "^4.0.6",
+    "ip-address": "^10.3.1",
+    "js-yaml": "^4.3.2",
+    "lodash": "^4.18.0",
+    "tar-fs": "^3.1.1",
+    "underscore": "^1.13.8",
+    "ws": "^8.21.0",
+    "express/path-to-regexp": "^0.1.13",
+    "**/mailparser/linkify-it": "^5.0.2",
+    "nodemailer": "^7.0.11",
+    "sharp": "^0.35.4"
   }
 }

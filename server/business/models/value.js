@@ -78,14 +78,23 @@ function currentPeriod(now = new Date()) {
  * submitted twice (or synced twice from a CRM) is rejected rather than
  * doubling the total.
  */
-function dedupeKeyFor({ category, period, sourceSystem, sourceReference, evidenceRef, amountCents }) {
+function dedupeKeyFor({
+  category,
+  period,
+  sourceSystem,
+  sourceReference,
+  evidenceRef,
+  amountCents,
+}) {
   const basis = [
     String(category ?? ""),
     String(period ?? ""),
     String(sourceSystem ?? "manual").toLowerCase(),
     // The source reference is the real identity when present; otherwise fall
     // back to the evidence reference and amount so obvious repeats collide.
-    String(sourceReference ?? evidenceRef ?? `amount:${amountCents}`).toLowerCase(),
+    String(
+      sourceReference ?? evidenceRef ?? `amount:${amountCents}`
+    ).toLowerCase(),
   ].join("|");
   return crypto.createHash("sha256").update(basis).digest("hex");
 }
@@ -124,7 +133,10 @@ const ValueRecords = {
 
     const amountCents = toCents(input.amountCents);
     if (amountCents === null || amountCents <= 0)
-      return { record: null, error: "Amount must be a positive number of cents." };
+      return {
+        record: null,
+        error: "Amount must be a positive number of cents.",
+      };
 
     // An avoided cost is meaningless without both sides of the comparison.
     const baselineCents = toCents(input.baselineCents);
@@ -139,12 +151,14 @@ const ValueRecords = {
       if (!input.baselineApprovedBy)
         return {
           record: null,
-          error: "Record who approved the baseline before claiming an avoided cost.",
+          error:
+            "Record who approved the baseline before claiming an avoided cost.",
         };
       if (measuredCents >= baselineCents)
         return {
           record: null,
-          error: "The measured figure is not lower than the baseline, so no cost was avoided.",
+          error:
+            "The measured figure is not lower than the baseline, so no cost was avoided.",
         };
       const difference = baselineCents - measuredCents;
       if (amountCents > difference)
@@ -165,7 +179,9 @@ const ValueRecords = {
     });
 
     try {
-      const existing = await prisma.value_records.findUnique({ where: { dedupe_key: dedupeKey } });
+      const existing = await prisma.value_records.findUnique({
+        where: { dedupe_key: dedupeKey },
+      });
       if (existing)
         return {
           record: null,
@@ -184,10 +200,18 @@ const ValueRecords = {
           currency: String(input.currency ?? "usd").toLowerCase(),
           recurring,
           verification: VERIFICATION.PENDING,
-          description: input.description ? String(input.description).slice(0, 1_000) : null,
-          evidence_ref: input.evidenceRef ? String(input.evidenceRef).slice(0, 300) : null,
-          evidence_note: input.evidenceNote ? String(input.evidenceNote).slice(0, 2_000) : null,
-          source_system: input.sourceSystem ? String(input.sourceSystem).slice(0, 120) : null,
+          description: input.description
+            ? String(input.description).slice(0, 1_000)
+            : null,
+          evidence_ref: input.evidenceRef
+            ? String(input.evidenceRef).slice(0, 300)
+            : null,
+          evidence_note: input.evidenceNote
+            ? String(input.evidenceNote).slice(0, 2_000)
+            : null,
+          source_system: input.sourceSystem
+            ? String(input.sourceSystem).slice(0, 120)
+            : null,
           source_reference: input.sourceReference
             ? String(input.sourceReference).slice(0, 300)
             : null,
@@ -201,7 +225,12 @@ const ValueRecords = {
         },
       });
 
-      await this.recordEvent(record.id, "created", actor, `${category} ${amountCents} cents`);
+      await this.recordEvent(
+        record.id,
+        "created",
+        actor,
+        `${category} ${amountCents} cents`
+      );
       await AuditLog.log({
         action: "value.record_created",
         category: AuditLog.CATEGORIES.SETTINGS,
@@ -224,13 +253,21 @@ const ValueRecords = {
    * Verifies or rejects a record. Verification is the only thing that makes a
    * number count, and it is deliberately a separate, audited action.
    */
-  setVerification: async function ({ uuid, verification, note = null, actor = null }) {
+  setVerification: async function ({
+    uuid,
+    verification,
+    note = null,
+    actor = null,
+  }) {
     if (!Object.values(VERIFICATION).includes(verification))
       return { success: false, error: "Unknown verification state." };
 
     try {
-      const existing = await prisma.value_records.findUnique({ where: { uuid: String(uuid) } });
-      if (!existing) return { success: false, error: "Value record not found." };
+      const existing = await prisma.value_records.findUnique({
+        where: { uuid: String(uuid) },
+      });
+      if (!existing)
+        return { success: false, error: "Value record not found." };
 
       if (verification === VERIFICATION.VERIFIED) {
         if (!existing.evidence_ref)
@@ -239,7 +276,11 @@ const ValueRecords = {
             error: "A record cannot be verified without an evidence reference.",
           };
         // Self-verification defeats the purpose of a verification step.
-        if (existing.createdBy && actor?.id && Number(existing.createdBy) === Number(actor.id))
+        if (
+          existing.createdBy &&
+          actor?.id &&
+          Number(existing.createdBy) === Number(actor.id)
+        )
           return {
             success: false,
             error:
@@ -251,13 +292,20 @@ const ValueRecords = {
         where: { uuid: String(uuid) },
         data: {
           verification,
-          verifiedBy: verification === VERIFICATION.VERIFIED ? (actor?.id ?? null) : null,
-          verifiedAt: verification === VERIFICATION.VERIFIED ? new Date() : null,
+          verifiedBy:
+            verification === VERIFICATION.VERIFIED ? actor?.id ?? null : null,
+          verifiedAt:
+            verification === VERIFICATION.VERIFIED ? new Date() : null,
           lastUpdatedAt: new Date(),
         },
       });
 
-      await this.recordEvent(record.id, `verification:${verification}`, actor, note);
+      await this.recordEvent(
+        record.id,
+        `verification:${verification}`,
+        actor,
+        note
+      );
       await AuditLog.log({
         action: "value.verification_changed",
         category: AuditLog.CATEGORIES.SETTINGS,
@@ -270,7 +318,10 @@ const ValueRecords = {
       return { success: true, record };
     } catch (error) {
       console.error("[Value] verification failed:", error.message);
-      return { success: false, error: "Unable to update the verification state." };
+      return {
+        success: false,
+        error: "Unable to update the verification state.",
+      };
     }
   },
 
@@ -281,7 +332,9 @@ const ValueRecords = {
           value_record_id: Number(valueRecordId),
           action: String(action).slice(0, 80),
           actor_id: actor?.id ? Number(actor.id) : null,
-          actor_label: actor?.username ? String(actor.username).slice(0, 120) : null,
+          actor_label: actor?.username
+            ? String(actor.username).slice(0, 120)
+            : null,
           detail: detail ? String(detail).slice(0, 1_000) : null,
         },
       });
@@ -292,7 +345,9 @@ const ValueRecords = {
 
   history: async function (uuid) {
     try {
-      const record = await prisma.value_records.findUnique({ where: { uuid: String(uuid) } });
+      const record = await prisma.value_records.findUnique({
+        where: { uuid: String(uuid) },
+      });
       if (!record) return [];
       return await prisma.value_record_events.findMany({
         where: { value_record_id: record.id },
@@ -318,9 +373,14 @@ const ValueRecords = {
 
   delete: async function ({ uuid, actor = null }) {
     try {
-      const existing = await prisma.value_records.findUnique({ where: { uuid: String(uuid) } });
-      if (!existing) return { success: false, error: "Value record not found." };
-      await prisma.value_record_events.deleteMany({ where: { value_record_id: existing.id } });
+      const existing = await prisma.value_records.findUnique({
+        where: { uuid: String(uuid) },
+      });
+      if (!existing)
+        return { success: false, error: "Value record not found." };
+      await prisma.value_record_events.deleteMany({
+        where: { value_record_id: existing.id },
+      });
       await prisma.value_records.delete({ where: { uuid: String(uuid) } });
       await AuditLog.log({
         action: "value.record_removed",
@@ -328,7 +388,10 @@ const ValueRecords = {
         actor,
         resource: "value_record",
         resourceId: uuid,
-        metadata: { category: existing.category, amountCents: existing.amount_cents },
+        metadata: {
+          category: existing.category,
+          amountCents: existing.amount_cents,
+        },
       });
       return { success: true };
     } catch (error) {
@@ -348,10 +411,15 @@ const ValueRecords = {
     const feeCents = this.monthlyFeeCents();
     const records = await this.where({ period: String(period) });
 
-    const verified = records.filter((r) => r.verification === VERIFICATION.VERIFIED);
-    const pending = records.filter((r) => r.verification === VERIFICATION.PENDING);
+    const verified = records.filter(
+      (r) => r.verification === VERIFICATION.VERIFIED
+    );
+    const pending = records.filter(
+      (r) => r.verification === VERIFICATION.PENDING
+    );
 
-    const sum = (rows) => rows.reduce((total, row) => total + (row.amount_cents ?? 0), 0);
+    const sum = (rows) =>
+      rows.reduce((total, row) => total + (row.amount_cents ?? 0), 0);
 
     // A one-time recovery is real value but it does not recur, so it must not
     // inflate a monthly multiple.
@@ -376,8 +444,14 @@ const ValueRecords = {
         display: config.PLAN.displayPriceWithInterval,
       },
       thresholds: {
-        x90: { multiple: THRESHOLDS.QUALIFIED_90X, requiredCents: feeCents * THRESHOLDS.QUALIFIED_90X },
-        x100: { multiple: THRESHOLDS.QUALIFIED_100X, requiredCents: feeCents * THRESHOLDS.QUALIFIED_100X },
+        x90: {
+          multiple: THRESHOLDS.QUALIFIED_90X,
+          requiredCents: feeCents * THRESHOLDS.QUALIFIED_90X,
+        },
+        x100: {
+          multiple: THRESHOLDS.QUALIFIED_100X,
+          requiredCents: feeCents * THRESHOLDS.QUALIFIED_100X,
+        },
       },
       verified: {
         recurringCents,
@@ -392,8 +466,14 @@ const ValueRecords = {
       // The UI must never say "qualified" on the strength of pending records.
       qualifiedOnVerifiedEvidenceOnly: true,
       shortfall: {
-        to90xCents: Math.max(0, feeCents * THRESHOLDS.QUALIFIED_90X - recurringCents),
-        to100xCents: Math.max(0, feeCents * THRESHOLDS.QUALIFIED_100X - recurringCents),
+        to90xCents: Math.max(
+          0,
+          feeCents * THRESHOLDS.QUALIFIED_90X - recurringCents
+        ),
+        to100xCents: Math.max(
+          0,
+          feeCents * THRESHOLDS.QUALIFIED_100X - recurringCents
+        ),
       },
       byCategory: Object.fromEntries(
         Object.keys(CATEGORIES).map((key) => [
@@ -409,15 +489,22 @@ const ValueRecords = {
    * return 90x or 100x. These are ASSUMPTIONS, never results, and the API
    * labels them that way.
    */
-  qualificationScenarios({ grossProfitPerSaleCents = null, monthlyCostBaseCents = null } = {}) {
+  qualificationScenarios({
+    grossProfitPerSaleCents = null,
+    monthlyCostBaseCents = null,
+  } = {}) {
     const feeCents = this.monthlyFeeCents();
     const scenarios = {};
 
     if (grossProfitPerSaleCents && grossProfitPerSaleCents > 0) {
       scenarios.additionalSales = {
         assumptionCents: grossProfitPerSaleCents,
-        for90x: Math.ceil((feeCents * THRESHOLDS.QUALIFIED_90X) / grossProfitPerSaleCents),
-        for100x: Math.ceil((feeCents * THRESHOLDS.QUALIFIED_100X) / grossProfitPerSaleCents),
+        for90x: Math.ceil(
+          (feeCents * THRESHOLDS.QUALIFIED_90X) / grossProfitPerSaleCents
+        ),
+        for100x: Math.ceil(
+          (feeCents * THRESHOLDS.QUALIFIED_100X) / grossProfitPerSaleCents
+        ),
       };
     }
 
@@ -426,9 +513,15 @@ const ValueRecords = {
         assumptionCents: monthlyCostBaseCents,
         // Expressed as a percentage of the stated cost base.
         percentFor90x:
-          Math.round(((feeCents * THRESHOLDS.QUALIFIED_90X) / monthlyCostBaseCents) * 1000) / 10,
+          Math.round(
+            ((feeCents * THRESHOLDS.QUALIFIED_90X) / monthlyCostBaseCents) *
+              1000
+          ) / 10,
         percentFor100x:
-          Math.round(((feeCents * THRESHOLDS.QUALIFIED_100X) / monthlyCostBaseCents) * 1000) / 10,
+          Math.round(
+            ((feeCents * THRESHOLDS.QUALIFIED_100X) / monthlyCostBaseCents) *
+              1000
+          ) / 10,
       };
     }
 

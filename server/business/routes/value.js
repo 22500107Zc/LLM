@@ -29,7 +29,10 @@ function valueRoutes(router) {
       const { period = null, verification = null } = request.query;
       const clause = {};
       if (period) clause.period = String(period);
-      if (verification && Object.values(VERIFICATION).includes(String(verification)))
+      if (
+        verification &&
+        Object.values(VERIFICATION).includes(String(verification))
+      )
         clause.verification = String(verification);
 
       response.status(200).json({
@@ -44,9 +47,9 @@ function valueRoutes(router) {
     "/value/records/:uuid/history",
     [requireCapability("analytics:view")],
     safeHandler(async (request, response) => {
-      response
-        .status(200)
-        .json({ history: await ValueRecords.history(String(request.params.uuid)) });
+      response.status(200).json({
+        history: await ValueRecords.history(String(request.params.uuid)),
+      });
     })
   );
 
@@ -54,7 +57,9 @@ function valueRoutes(router) {
     "/value/export",
     [requireCapability("analytics:view")],
     safeHandler(async (request, response) => {
-      const clause = request.query.period ? { period: String(request.query.period) } : {};
+      const clause = request.query.period
+        ? { period: String(request.query.period) }
+        : {};
       const records = await ValueRecords.where(clause);
       response.setHeader("Content-Type", "text/csv; charset=utf-8");
       response.setHeader(
@@ -73,16 +78,16 @@ function valueRoutes(router) {
     "/value/scenarios",
     [requireCapability("analytics:view")],
     safeHandler(async (request, response) => {
-      const grossProfitPerSaleCents = Number(request.query.grossProfitPerSaleCents) || null;
-      const monthlyCostBaseCents = Number(request.query.monthlyCostBaseCents) || null;
-      response
-        .status(200)
-        .json(
-          ValueRecords.qualificationScenarios({
-            grossProfitPerSaleCents,
-            monthlyCostBaseCents,
-          })
-        );
+      const grossProfitPerSaleCents =
+        Number(request.query.grossProfitPerSaleCents) || null;
+      const monthlyCostBaseCents =
+        Number(request.query.monthlyCostBaseCents) || null;
+      response.status(200).json(
+        ValueRecords.qualificationScenarios({
+          grossProfitPerSaleCents,
+          monthlyCostBaseCents,
+        })
+      );
     })
   );
 
@@ -94,9 +99,10 @@ function valueRoutes(router) {
         actor: response.locals.user,
       });
       if (!result.record)
-        return response
-          .status(400)
-          .json({ error: result.error, duplicateOf: result.duplicateOf ?? null });
+        return response.status(400).json({
+          error: result.error,
+          duplicateOf: result.duplicateOf ?? null,
+        });
       response.status(200).json({ record: result.record });
     })
   );

@@ -23,3 +23,10 @@ test-results/
 # configs and backups. Never commit any of this.
 deployments/
 backups/
+
+# Generated test fixtures and Stripe CLI artefacts, in case a run is pointed at
+# the repository instead of a temporary directory.
+scripts/fixtures/
+.stripe/
+stripe-cli-*
+*.stripe-events.json

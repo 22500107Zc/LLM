@@ -1,6 +1,6 @@
 /**
- * Generates the PDF and DOCX fixtures the document tests need, with known
- * content so retrieval can be asserted against specific facts.
+ * Generates the PDF, DOCX and PPTX fixtures the document tests need, with
+ * known content so retrieval can be asserted against specific facts.
  *
  * The files are created deterministically in the requested directory and are
  * regenerated when absent, so a clone with no fixtures still runs.
@@ -44,6 +44,22 @@ const DOCX_FACTS = Object.freeze({
   ],
 });
 
+const PPTX_FACTS = Object.freeze({
+  filename: "onboarding-deck.pptx",
+  question: "How long does onboarding take?",
+  expectedConcepts: ["14 days onboarding"],
+  slides: [
+    [
+      "Acme Corporation - Customer Onboarding",
+      "Onboarding is completed within 14 days of the kickoff call.",
+    ],
+    [
+      "Escalation",
+      "Unresolved onboarding issues are escalated to the account manager.",
+    ],
+  ],
+});
+
 /** Loads a dependency from the server workspace, where it is installed. */
 function serverModule(name) {
   return require(path.join(SERVER_DIR, "node_modules", name));
@@ -76,7 +92,61 @@ async function writeDocx(target) {
 }
 
 /**
- * Ensures both fixtures exist in `directory` and returns their paths.
+ * A minimal but valid PPTX. This exercises the collector's office-document
+ * path (officeparser), which is a different parser from the PDF and DOCX
+ * paths and has its own archive-extraction behaviour.
+ */
+function writePptx(target) {
+  const JSZip = serverModule("jszip");
+  const zip = new JSZip();
+
+  const slidePaths = PPTX_FACTS.slides.map((_, i) => `/ppt/slides/slide${i + 1}.xml`);
+  zip.file(
+    "[Content_Types].xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+      `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+      `<Default Extension="xml" ContentType="application/xml"/>` +
+      `<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>` +
+      slidePaths
+        .map(
+          (p) =>
+            `<Override PartName="${p}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`
+        )
+        .join("") +
+      `</Types>`
+  );
+  zip.file(
+    "_rels/.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>` +
+      `</Relationships>`
+  );
+  zip.file(
+    "ppt/presentation.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>`
+  );
+  PPTX_FACTS.slides.forEach((lines, index) => {
+    zip.file(
+      `ppt/slides/slide${index + 1}.xml`,
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+        `<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ` +
+        `xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">` +
+        `<p:cSld><p:spTree><p:sp><p:txBody>` +
+        lines.map((line) => `<a:p><a:r><a:t>${line}</a:t></a:r></a:p>`).join("") +
+        `</p:txBody></p:sp></p:spTree></p:cSld></p:sld>`
+    );
+  });
+
+  return zip
+    .generateAsync({ type: "nodebuffer" })
+    .then((buffer) => fs.writeFileSync(target, buffer));
+}
+
+/**
+ * Ensures every fixture exists in `directory` and returns their paths.
  * @param {string} directory
  */
 async function ensureFixtures(directory) {
@@ -84,16 +154,19 @@ async function ensureFixtures(directory) {
 
   const pdfPath = path.join(directory, PDF_FACTS.filename);
   const docxPath = path.join(directory, DOCX_FACTS.filename);
+  const pptxPath = path.join(directory, PPTX_FACTS.filename);
 
   if (!fs.existsSync(pdfPath)) await writePdf(pdfPath);
   if (!fs.existsSync(docxPath)) await writeDocx(docxPath);
+  if (!fs.existsSync(pptxPath)) await writePptx(pptxPath);
 
-  return { pdfPath, docxPath, directory };
+  return { pdfPath, docxPath, pptxPath, directory };
 }
 
 module.exports = {
   ensureFixtures,
   PDF_FACTS,
   DOCX_FACTS,
+  PPTX_FACTS,
   ABSENT_FACT_QUESTION,
 };
