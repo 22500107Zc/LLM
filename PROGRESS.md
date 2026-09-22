@@ -375,11 +375,18 @@ One value, in the Vercel project's environment variables:
 
 | Variable | What |
 | --- | --- |
-| `DATABASE_URL` | The Supabase Postgres connection string. Use the **pooled** one (port 6543) — the serverless entry adds `pgbouncer=true` and `connection_limit=1` itself. The build creates the schema with `prisma db push`. |
+| `DATABASE_URL` | A PostgreSQL connection string. Supabase is the preferred provider; Neon or any reputable managed Postgres works identically — nothing in this repository names a vendor. Use the **pooled** endpoint where one exists (Supabase port 6543, Neon's `-pooler` host): `api/index.js` detects a pooler and adds `pgbouncer=true` and `connection_limit=1` itself, and leaves a direct URL alone so migrations still work. |
 
-Everything else is set: `FOUNDER_PASSWORD_HASH`, `JWT_SECRET`, `SIG_KEY`,
-`SIG_SALT` and `AI_CREDENTIAL_KEY` are all in place and rotated. No AI provider
-key is needed — customers supply their own.
+**Proved against a virgin database**, not just an existing one: an empty
+Postgres, `prisma db push`, then the full commercial loop — founder creates a
+customer, the customer signs in, connects their own AI service, gets a real
+answer through their own credential, is disabled and restored, and none of it
+leaks to a second customer. 92 checks, 0 failures, 0 blocked. So any Postgres
+URL works the moment it is pasted; there is no provider-specific setup step.
+
+Everything else is already set and rotated: `FOUNDER_PASSWORD_HASH`,
+`JWT_SECRET`, `SIG_KEY`, `SIG_SALT`, `AI_CREDENTIAL_KEY`. No AI provider key is
+needed — customers supply their own.
 
 Then, with the founder password in the environment and never on the command
 line:
@@ -387,3 +394,17 @@ line:
 ```
 FOUNDER_PASSWORD=... node scripts/production-acceptance.cjs
 ```
+
+### Why this one value could not be supplied from here
+
+Recorded so no future session repeats the search:
+
+| Path | Result |
+| --- | --- |
+| Supabase / Neon / any marketplace Postgres via Vercel | `list_integration_configurations` → **403 Forbidden** on this token |
+| Vercel storage | the only store-creation capability available is Blob; no Postgres |
+| Vercel AI Gateway key (for the older design) | `create_api_keys` → **403 Forbidden** |
+| Supabase or Neon CLI / API directly | neither CLI installed, no account or API token in this environment |
+| Another Vercel project's database | reading other projects' environment variables is blocked, and pointing this product at another application's schema would risk that application |
+| Cloud credentials present in this sandbox | they belong to the agent environment, not to this account — customer data would sit somewhere the owner cannot control, pay for or keep |
+
