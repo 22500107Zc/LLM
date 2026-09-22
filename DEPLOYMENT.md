@@ -1,26 +1,38 @@
 # Deployment Guide
 
-Managed Business AI Operations Platform — one business, one dedicated deployment.
+Managed Business AI Operations Platform — one application, many founder-created
+customer accounts.
 
 ---
 
 ## 1. Architecture
 
-Each customer receives an isolated deployment:
+**One application. One database. Many customer accounts.**
 
-| Isolated | How |
+A customer is an account the founder creates inside the running application.
+Selling to someone does not start a container, does not need a new domain and
+does not create a second website.
+
+| | |
 | --- | --- |
-| Application | Its own container |
-| Database | Its own SQLite file (or PostgreSQL instance) on a dedicated volume |
-| Users, workspaces, agents | Scoped to that database |
-| Vector data | Its own LanceDB directory on the same volume |
-| Documents | Its own storage volume |
-| API credentials | Its own `.env` |
-| Integrations, logs, backups | Per deployment |
-| Domain | `customer.yourdomain.com` |
+| Application | One deployment serving every customer |
+| Database | One SQLite file (or PostgreSQL), holding all accounts |
+| Customer account | A `users` row plus a `business_customers` row |
+| Login | Email + password, both set by the founder |
+| Access control | `users.suspended`, founder-controlled, checked on every request |
+| Isolation between customers | Workspace membership — a customer only sees workspaces they belong to |
+| Payment | Stripe, entirely outside the application |
 
-No data is shared between customers. There is no shared multi-tenant layer and
-no Kubernetes requirement.
+### What this is not
+
+- Not one deployment per customer.
+- Not one website or domain per customer.
+- Not Stripe-driven: no API key, no webhook, nothing automatic about access.
+- Not self-service: there is no public signup.
+
+Self-hosting the application for a single business on its own box is still
+supported — that is what `scripts/operator.sh` and the Docker setup below are
+for. It is infrastructure tooling, not the commercial account model.
 
 ---
 
@@ -34,67 +46,81 @@ no Kubernetes requirement.
 
 ---
 
-## 2a. The founder console (optional)
+## 2a. Selling a customer, and the founder console
 
-`scripts/operator.sh` is the complete operator interface and nothing depends on
-the console. If you would rather work from a browser, the same provisioning
-code is available behind a password at `/founder`.
+**This is the commercial workflow.** `scripts/operator.sh` and Docker are
+infrastructure tooling for running the application; they are not how you take
+on a customer.
 
-**It runs on the host that holds `deployments/`, and nowhere else.** A
-customer's deployment has no state directory mounted, so the console refuses to
-switch on there and every founder route answers 404 — not 401, which would
-confirm the paths exist.
+A customer is an **account in the application**. Creating one starts no
+container, needs no new domain and needs no second website.
 
-Generate the password hash on that host. The script reads the password with
-echo off and prints only the hash; the password itself is never written, echoed
-or passed as an argument:
+### The workflow
+
+1. Qualify the business.
+2. Email them your Stripe-hosted subscription Payment Link. This happens
+   entirely outside the application.
+3. They subscribe.
+4. You confirm the payment in Stripe.
+5. They tell you the email address and password they want.
+6. Sign in at `https://your-app/founder`.
+7. Create their account: business name, their login email, their password.
+8. They sign in at `https://your-app/` with that email and password.
+
+Stripe bills them every month on its own. The application never talks to
+Stripe, needs no Stripe API key, and receives no webhook to let them in.
+
+### If they stop paying
+
+Open `/founder`, find them, **Disable access**. Their current session stops
+working on their very next request — not when their token expires. No data is
+deleted. When they resolve it, **Restore access** and they can sign in again.
+
+You are the source of truth. Nothing automates this, on purpose.
+
+### Enabling the console
+
+Generate the password hash. The script reads the password with echo off and
+prints only the hash; the password is never written, echoed or passed as an
+argument, and it refuses to run without a terminal so it cannot land in shell
+history:
 
 ```bash
 node scripts/founder-password.cjs
 ```
 
-Put the three lines it prints into that host's `.env`:
+Put what it prints into the application's `.env`:
 
 ```
 FOUNDER_CONSOLE_ENABLED=true
 FOUNDER_PASSWORD_HASH=$2b$12$…
-PLATFORM_STATE_DIR=/srv/platform/deployments
 ```
 
-Then restart, and open `https://your-host/founder`.
+Restart, then open `https://your-app/founder`.
 
-What it does:
+With `FOUNDER_CONSOLE_ENABLED` unset, every founder route answers 404 — not
+401, which would confirm the paths exist.
+
+### What the console does
 
 | | |
 | --- | --- |
-| Lists every business on the host | From `deployments/`, presence flags only — no secret value leaves the host |
-| Provisions a new one | The same shared service the CLI calls. Writes configuration; starts nothing |
-| Hands out the Payment Link | That business's own link with its `client_reference_id` attached |
-| Shows billing and readiness | Read from each deployment over loopback with its own `HEALTHCHECK_TOKEN` |
-| Shows unmatched payments | Inspection only — these are resolved in Stripe |
+| Create a customer | Business name, authorized login email, their chosen password |
+| List customers | Login email, access state, created date |
+| Edit | Business information, contact, your own payment note |
+| Change email | The old address stops working immediately |
+| Set a new password | The old one stops working. The current one cannot be shown — only a hash exists |
+| Disable / restore | Application access, founder-controlled |
+| Remove | Permanent, and requires typing the business name back |
 
-What it deliberately cannot do:
+### Two things to get right
 
-- **Start or stop a container.** That is the one privileged operation in the
-  platform and it stays in the CLI. The console prints the exact command.
-- **Mark a business paid.** Only the Stripe webhook does that, and only from an
-  event it can prove belongs to that deployment.
-- **Run a command.** No founder input reaches a shell, a process or Docker.
-
-A business provisioned this way **starts unpaid**: `BILLING_ENFORCEMENT_ENABLED`
-and `BILLING_REQUIRE_ACTIVATION` are both `true`, so AI usage is suspended until
-the webhook records the first payment. Nothing else is restricted and no data is
-affected. Existing deployments are unchanged — `BILLING_REQUIRE_ACTIVATION`
-defaults to `false` and only provisioning sets it.
-
-Two things to get right:
-
-- **Do not expose `/founder` publicly if you do not need it.** Restrict it at
-  the reverse proxy to your own address as well. The password is the control,
-  but there is no reason to offer the login page to the internet.
-- **A change to a `.env` needs a restart.** A running container read its
-  configuration at boot, so recording a Payment Link in the console does not
-  take effect until `./scripts/operator.sh update <slug>`.
+- **Restrict `/founder` at the reverse proxy** to your own address as well. The
+  password is the control, but there is no reason to offer the login page to
+  the internet.
+- **Customers are `default` role**, never admin. An admin would see every other
+  customer's workspaces. The console enforces this; do not create customer
+  accounts by hand through the admin UI.
 
 ---
 
@@ -383,19 +409,29 @@ set. Setting `PUBLIC_URL` explicitly is safer.
 
 ---
 
-## 5. Stripe webhook
+## 5. Stripe (optional, and outside the application)
 
-Point a Stripe webhook endpoint at:
+**No Stripe configuration is required.** The product does not ask Stripe
+anything to decide who may sign in, and it needs no Stripe API key. A customer
+can use the application with every Stripe variable unset — there is a test that
+proves it by deleting all of them and signing a customer in anyway.
 
-```
-https://customer.yourdomain.com/api/billing/stripe/webhook
-```
+How payment works is in §2a: you email a hosted Payment Link, they subscribe,
+Stripe bills them monthly, and you create their account once you see the money.
 
-Copy the resulting signing secret into `STRIPE_WEBHOOK_SECRET` and restart.
+The billing module and webhook endpoint still exist for operators who want
+subscription *reporting* inside the application. They are inert as far as
+access is concerned:
 
+- A webhook **cannot** create an account.
+- A webhook **cannot** activate, disable or restore one.
+- A payment failure **cannot** lock anybody out.
+
+If you want that reporting, point a Stripe webhook at
+`https://your-app/api/billing/stripe/webhook` and set `STRIPE_WEBHOOK_SECRET`.
 The endpoint is mounted with a raw body parser ahead of the JSON parser so the
-exact signed bytes are preserved for verification. Unsigned, mis-signed,
-tampered and replayed requests are all rejected.
+exact signed bytes are preserved; unsigned, mis-signed, tampered and replayed
+requests are all rejected. Skip this entirely if you do not want it.
 
 ---
 
@@ -419,20 +455,23 @@ restoring the capability.
 
 ---
 
-## 7. Stripe product configuration
+## 7. Setting up the Payment Link in Stripe
 
-Create once in the Stripe Dashboard, then reuse the IDs for every deployment.
+This is done once, in the Stripe Dashboard. The application is not involved and
+needs none of these IDs.
 
 1. **Product** → name `Managed Business AI Platform`
-2. **Price** → `3888.88 USD`, recurring, monthly → copy `price_…` into `STRIPE_PRICE_ID`
-3. Copy the product id `prod_…` into `STRIPE_PRODUCT_ID`
-4. **Customer Portal** → enable, allow payment-method updates, invoice history
-   and cancellation; disable plan switching (there is only one plan). Copy the
-   configuration id into `STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID`
-5. **Webhook** → the URL in §5, subscribing to the events in §9
+2. **Price** → `3888.88 USD`, recurring, monthly
+3. **Payment Link** → create one for that price, with the subscription options
+   you want. Copy the `https://buy.stripe.com/…` URL.
+4. That URL is what you email a customer. Keep it somewhere you can find it.
 
-Verify with **Billing → Refresh from Stripe**. The Billing page warns if the
-configured price does not equal $3,888.88/month.
+That is the whole integration. You are not required to create an API key, and
+you should not put one in the application.
+
+The optional reporting features in §5 and §9 need `STRIPE_SECRET_KEY` and
+`STRIPE_WEBHOOK_SECRET`. Skip them unless you want in-app billing reporting;
+nothing about customer access depends on them.
 
 ---
 
@@ -536,22 +575,29 @@ DOC_TEST_USER=<admin> DOC_TEST_PASSWORD=<password> \
 
 ---
 
-## 9. Stripe events consumed
+## 9. Stripe events (only if you enabled the optional reporting)
 
-| Event | Effect |
+None of these grants, revokes or restores application access. That is the
+founder's decision, made in `/founder`. These only update what the in-app
+billing report shows.
+
+| Event | Effect on the report |
 | --- | --- |
-| `checkout.session.completed` | Binds customer + subscription, activates |
+| `checkout.session.completed` | Records the customer and subscription |
 | `customer.subscription.created` | Syncs state |
 | `customer.subscription.updated` | Syncs state, period, cancellation flag |
 | `customer.subscription.deleted` | Marks canceled (no data is deleted) |
 | `customer.subscription.paused` / `.resumed` | Syncs state |
-| `invoice.paid` / `invoice.payment_succeeded` | Clears dunning, records payment |
-| `invoice.payment_failed` | Starts the grace-period clock |
-| `invoice.payment_action_required` | Flags for customer action |
+| `invoice.paid` / `invoice.payment_succeeded` | Records payment |
+| `invoice.payment_failed` | Records the failure |
+| `invoice.payment_action_required` | Flags for attention |
 | `customer.deleted` | Audited only |
 
 Every event id is claimed in `billing_events` before being applied, so replays
 are ignored. A failed apply releases the claim so Stripe's retry is processed.
+
+**A failed payment does not lock anyone out.** If you want a customer to lose
+access, disable them in `/founder`.
 
 ---
 

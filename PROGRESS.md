@@ -24,8 +24,8 @@ configurable subscription fee (currently $3,888.88/month via
 | Frontend | React + Vite (`frontend/`) |
 | Collector | Separate Node service for document parsing (`collector/`) |
 | Money | **Integer cents everywhere.** No floats, no Decimal library needed. |
-| Tenancy | **One business = one dedicated deployment.** Isolation is the container boundary, not a `company_id` column. There is no shared multi-tenant database. |
-| Provisioning | `scripts/operator.sh` — the operator/founder CLI |
+| Accounts | **One application, many founder-created customer accounts.** A customer is a `users` row plus a `business_customers` row. Isolation is workspace membership. |
+| Onboarding | The founder console at `/founder`. `scripts/operator.sh` still exists for self-hosted/dev operations but is NOT the commercial onboarding path. |
 
 ### What this repository is NOT
 
@@ -34,9 +34,9 @@ or billing comparison, no FastAPI, no PostgreSQL, no Python, and no multi-tenant
 company table. If a prompt describes those, they do not exist here — check
 before building, and do not create a second application alongside this one.
 
-There **is** now a founder control plane (`/founder`), but it is not a tenancy
-layer: it reads the operator host's `deployments/` directory and each
-deployment's own status endpoint. See "Founder control plane" below.
+There **is** a founder control plane at `/founder`. It manages customer
+*accounts* in this one application — it does not create deployments, containers
+or websites. See "Founder control plane" below.
 
 ---
 
@@ -48,22 +48,22 @@ deployment's own status endpoint. See "Founder control plane" below.
   quality testing, team roles, integrations, audit log.
 - **AI quality grader** — clause-aware deterministic grading
   (`server/business/services/answerGrading.js`). No paid LLM call to grade.
-- **Stripe deployment binding** — `server/business/billing/binding.js`. An
-  unbound deployment can only bind from a checkout it can prove is its own.
+- **Founder-controlled customer accounts** — `server/business/models/customer.js`
+  and `server/business/founder/`. The founder creates, disables and restores
+  accounts. Stripe is not consulted.
 - **Value / return on subscription** — `server/business/models/value.js`.
   Reports the customer's own return; no targets, no qualification verdict.
   Separates recorded/estimated from verified. Never counts a lead as revenue.
 - **Operator CLI** — `scripts/operator.sh`: provision, check, update, status,
   list, backup, restore-test, restore, suspend, resume, logs,
   remove-containers. Update stops if its backup fails. No data-deletion command.
-- **Stripe-hosted Payment Link** — the preferred way to take payment. See
-  "Important architectural decisions" below.
-- **Access-gate coverage** — `GATED_AI_PATHS` in
-  `server/business/routes/index.js` lists every path where AI usage is gated,
-  and a test walks the real route files and fails if any endpoint reaching a
-  model is missing from it. This found and closed a real gap: the developer
-  API's thread chat endpoints were ungated, so a restricted deployment could
-  keep using the model by calling them directly.
+- **Stripe stays outside the application** — payment is arranged by sending a
+  hosted Payment Link by email. No Stripe API key is required and no webhook
+  grants access.
+- **AI endpoint coverage** — `AI_ENDPOINTS` in
+  `server/business/routes/index.js` lists every endpoint that reaches a model,
+  and a test walks the real route files and fails if a new one appears that is
+  not accounted for.
 - **Security and dependency gates** — zero critical advisories in production
   dependencies; remaining highs documented in `SECURITY_AUDIT.md` with chain and
   reachability. Committed-secret scanner reports locations only, never values.
@@ -76,8 +76,9 @@ Nothing in flight.
 
 ## Remaining / next actions
 
-1. **Run the three credential-bound gates** (no code needed, see below).
-2. **Private repository migration** — `PRIVATE_REPO_MIGRATION.md`. Blocked on an
+1. **Deploy to Vercel** — blocked on a product decision, see `VERCEL.md`.
+2. **Run the two credential-bound gates** (no code needed, see below).
+3. **Private repository migration** — `PRIVATE_REPO_MIGRATION.md`. Blocked on an
    account action; the script copies and verifies and deletes nothing.
 
 ---
@@ -85,20 +86,15 @@ Nothing in flight.
 ## Test status
 
 ```
-npx jest                       1521 passed, 3 failed (ffmpeg), 1524 total
-npx jest __tests__/business     429 passed, 429 total   (run from server/)
+npx jest                       1525 passed, 3 failed (ffmpeg), 1528 total
+npx jest __tests__/business     433 passed, 433 total   (run from server/)
 ./scripts/final-verification.sh 19 passed, 1 failed, 3 blocked
 ./scripts/operator-backup-test.sh   18 passed, 0 failed
 ```
 
-The founder suite was proved to catch what it exists for: each of ten defects
-was reintroduced one at a time — the route's auth gate removed, an unknown
-session token accepted, the CSRF check skipped, the password hash returned from
-`/session`, a business provisioned already active, an unpaid deployment treated
-as paid, a payment link accepted on any host, and the operator status endpoint
-left open with no token configured, the login lockout keyed on a forgeable
-`X-Forwarded-For`, and the failed-attempt map left unbounded — and the suite
-failed on every one.
+The 51 founder tests run against a real database, real HTTP and the real login
+endpoint — including the one that matters most: sign a customer in, disable
+them mid-session, and watch their very next request come back 401.
 
 The 3 failures are `FFMPEGWrapper` tests needing an ffmpeg binary this machine
 cannot download. **Proved** pre-existing: `scripts/final-verification.sh` builds
@@ -110,11 +106,10 @@ the ffmpeg source and tests are byte-identical to upstream.
 ## Known issues
 
 - **ffmpeg** — see above. Environmental, affects audio/video transcription only.
-- **Three gates cannot run here** and are never reported as passing:
+- **Two gates cannot run here** and are never reported as passing:
 
 | Gate | Needs | Command |
 | --- | --- | --- |
-| Genuine Stripe checkout | test-mode key + price + `stripe` CLI | `node scripts/stripe-live-test-checkout.cjs` |
 | Provider answer correctness | a model provider key | `OPEN_AI_KEY=... ./scripts/run-disposable-acceptance.sh` |
 | Production image build/boot | a Docker daemon | `./scripts/docker-image-verification.sh` |
 
@@ -126,112 +121,102 @@ the ffmpeg source and tests are byte-identical to upstream.
 
 ## Founder control plane
 
-`/founder` — one operator, one password. Optional: `scripts/operator.sh` remains
-the complete operator interface and nothing depends on the console.
+`/founder` — one operator, one password, and the customers of this one
+application.
 
 | Piece | Where |
 | --- | --- |
 | Authentication | `server/business/founder/auth.js` |
 | API | `server/business/founder/routes.js`, mounted at `/api/founder` |
-| Live status reader | `server/business/founder/deploymentStatus.js` |
-| Shared provisioning core | `server/business/services/provisioning.js` |
-| CLI bridge to that core | `scripts/provision-core.cjs` |
+| Customer model | `server/business/models/customer.js` |
 | Password hash generator | `scripts/founder-password.cjs` |
 | UI | `frontend/src/pages/Founder/`, `frontend/src/models/founder.js` |
 | Setup | `DEPLOYMENT.md` §2a |
 
-**One provisioning implementation, two front doors.** `cmd_provision` in
-`operator.sh` is entirely filesystem work, so it moved into a shared Node
-service that both the CLI and the console call. Two copies of the collision
-checks would eventually differ in a way that puts two customers on one port.
+### The commercial workflow
 
-**The password exists only as a bcrypt hash in `FOUNDER_PASSWORD_HASH`.** A test
-walks the source tree and fails if `FOUNDER_PASSWORD_HASH` is read anywhere but
-`founder/auth.js` (and `updateENV.js`, which only keeps it from being deleted),
-or if the string appears anywhere in the frontend. The session is an opaque
-random token in an HttpOnly cookie, held server-side; the client keeps only a
-CSRF token, which does nothing without the cookie.
+1. Qualify a business.
+2. Send them the Stripe-hosted Payment Link **by email**, outside the product.
+3. They subscribe. Confirm the money arrived.
+4. In `/founder`, create their account with the login email and password they
+   chose.
+5. They sign in at the same application everyone else uses.
+6. If they stop paying, disable them. If they resume, restore them.
 
-**A customer session is worth nothing here.** `requireFounder` looks only at the
-founder cookie and the server-side store. The router is mounted on `app` before
-the customer API router, so no customer middleware touches it and it touches
-none of theirs.
+There is no public signup, no free trial, no self-service organization, and no
+route that turns a payment into an account.
 
-**Where there is no state directory, there is no console.** A customer's own
-deployment has none, so `availability()` fails and every route answers 404 —
-not 401, which would confirm the paths exist.
+### A customer is an account, not a deployment
 
-**No founder input reaches a shell.** The provisioning service executes no
-process and never talks to Docker. Starting a container is the one privileged
-operation in the platform; it stays in the CLI and the console prints the exact
-command. There is no `run`, `exec` or equivalent endpoint, and a test asserts
-that several plausible spellings of one are unhandled.
+One `users` row plus one `business_customers` row holding the business
+information. Creating a customer starts no container, writes no env file and
+needs no new website or domain.
 
-**Nothing in the console can mark a business paid.** Only the Stripe webhook
-does that, from an event it can prove belongs to that deployment. Unmatched
-events are inspection-only and resolved in Stripe — rebinding one from a web
-form is exactly the mistake an unmatched event is warning about.
+### One credential store, one access flag
 
-**A provisioned business starts unpaid.** Provisioning writes
-`BILLING_ENFORCEMENT_ENABLED=true` and `BILLING_REQUIRE_ACTIVATION=true`, so AI
-usage is suspended until the webhook records the first payment. Data is
-untouched and administration stays available. `BILLING_REQUIRE_ACTIVATION`
-defaults to `false`, so no existing deployment's behaviour changed.
+The login email is the `users.username` field, which already accepts a
+lowercased address. The password is hashed by the inherited `User` model — the
+same store `/request-token` reads. Nothing in `customer.js` hashes a password
+itself.
 
-**Live status comes over loopback.** Each deployment serves
-`GET /api/platform/operator-status`, guarded by a *strict* health-token check
-that 404s when no token is configured (unlike the uptime probe, which passes
-through so bring-up works). The console calls it on 127.0.0.1 at the port
-recorded in the state directory — never a host from a request — using the
-`HEALTHCHECK_TOKEN` provisioning already generated. It returns subscription
-state, readiness and unmatched events; no Stripe key, no signing secret, no
-customer data, and the deployment identifier only as an 8-character
-fingerprint.
+Access state is `users.suspended` and nowhere else, because that is the flag
+`utils/middleware/validatedRequest.js` already checks. It re-reads the user from
+the database on **every authenticated request**, so disabling a customer ends
+the session they are sitting in rather than lasting until their token expires —
+and there is nothing to bypass by calling an endpoint directly.
 
-## Important architectural decisions
+Customers are created `default`, never `admin`: an admin would see every other
+customer's workspaces. Workspace membership (`Workspace.whereWithUser`) is the
+isolation primitive.
 
-**Payment: Stripe-hosted Payment Link, not an API-created Checkout Session.**
-Creating a Checkout Session needs an outbound Stripe call at the exact moment a
-customer is paying, so a network blip or an expired key becomes a failed sale.
-`STRIPE_PAYMENT_LINK` is a static hosted URL; the application appends
-`client_reference_id=<DEPLOYMENT_ID>` and hands it over. Nothing can fail at
-purchase time. `createCheckoutSession` is **kept** for deployments with no link
-configured — the payment-link path is additive, not a replacement.
+### Stripe is outside application authorization
 
-**Matching: `client_reference_id`, not email.** `DEPLOYMENT_ID` is 64 random hex
-characters that only ever leave the server inside that link. Stripe echoes it
-back on `checkout.session.completed`, giving a stable match that does not depend
-on the customer typing the right email. Email is a prefill convenience only.
-Comparison is constant-time (`binding.idsMatch`).
+No Stripe API key is required. No webhook grants, revokes or restores access.
+No Checkout Session, customer or subscription is created through Stripe's API
+by this product. The subscription gate that used to answer 402 on AI routes is
+unmounted, and a test deletes every Stripe variable from the environment and
+signs a customer in anyway.
 
-**An unmatchable payment never activates anything.** Three outcomes, all
-recorded in `billing_events`:
-- `processed` — applied
-- `rejected` — demonstrably belongs to another deployment
-- `unmatched` — could not be told safely; **surfaced to a human** on the Billing
-  page and via `GET /api/business/billing/events`
+`payment_note` on the customer record is the founder's own memo that money
+arrived. Nothing reads it to decide anything.
 
-**Webhook idempotency** — every `stripe_event_id` is recorded before processing
-and unique-constrained, so a replay cannot double-apply. Binding is a single
-conditional `UPDATE` against the unbound state, so concurrent deliveries cannot
-both win.
+The billing module survives as inert reporting. It can no longer conclude that
+anyone should be locked out.
 
-**Access is enforced server-side.** `server/business/middleware/billingGate.js`
-returns HTTP 402 on restricted AI usage. Hiding frontend buttons is not the
-control. Restriction suspends usage and never deletes data.
+### Founder credential handling
 
-**Detected is not recovered.** The Value model refuses to treat an estimate as
-verified, structurally cannot file a lead as revenue, and keeps one-time
-recoveries out of the monthly multiple. Do not weaken this.
+The password exists only as a bcrypt hash in `FOUNDER_PASSWORD_HASH`. A test
+walks the source tree and fails if it is read anywhere but `founder/auth.js`
+(and `updateENV.js`, which only keeps it from being deleted), or if the string
+appears anywhere in the frontend. The session is an opaque random token in an
+HttpOnly cookie held server-side; the browser keeps only a CSRF token, which
+does nothing without the cookie. Login is rate limited per address, keyed on
+the address Express resolves rather than a forgeable `X-Forwarded-For`.
 
-**Secrets never reach the browser.** `STRIPE_WEBHOOK_SECRET` and
-`STRIPE_SECRET_KEY` are in `protectedKeys` in
-`server/utils/helpers/updateENV.js` and are never returned by any route.
-`GET /billing/events` returns the webhook *endpoint URL* and never the secret.
+A customer's JWT is worth nothing on the founder API: `requireFounder` looks
+only at the founder cookie and the server-side store, and the router mounts
+ahead of the customer API router.
 
 ---
 
+## Deploying to Vercel
+
+**Not yet deployed.** See `VERCEL.md` for the measured blockers and what a
+migration would take. The short version:
+
+- The production dependency tree is **669 MB**; a Vercel Node function is
+  limited to roughly 250 MB unzipped.
+- LanceDB, SQLite and the native embedding runtime all persist to local disk,
+  which a serverless runtime does not keep.
+- The document collector is a second long-running service.
+
+Getting there means moving vector storage and embeddings to HTTP services and
+SQLite to Postgres, which removes capabilities from the self-hosted product.
+That is a product decision, not a packaging detail.
+
 ## Next action
 
-Run the three credential-bound gates on a machine that has a Docker daemon, a
-Stripe test key and a model provider key. No further code is required for them.
+Decide the Vercel question in `VERCEL.md`: whether to move vector storage and
+embeddings to hosted HTTP services so the product fits a serverless runtime, or
+to host it where it keeps a filesystem. No Vercel project exists for this
+application yet.
