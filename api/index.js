@@ -127,23 +127,44 @@ function build() {
     apiRouter
   );
 
-  // Says plainly what is not available here rather than failing obscurely.
+  // Features this runtime cannot host answer with something a business person
+  // can act on. No status code a customer would read as a crash, no stack
+  // trace, and no infrastructure vocabulary - they did not buy a deployment,
+  // they bought a product.
   const unavailable = (feature) => (_request, response) =>
-    response.status(501).json({
-      error: "not_available_on_this_deployment",
-      message: `${feature} is not available on the serverless deployment. See VERCEL.md.`,
+    response.status(503).json({
+      error: "feature_unavailable",
+      message: `${feature} is not enabled on your plan yet. Everything else works normally - contact support if you need it.`,
     });
 
-  apiRouter.use("/document", unavailable("Document upload and parsing"));
-  apiRouter.use("/agent-invocation", unavailable("Agent websockets"));
+  apiRouter.use("/document", unavailable("Document upload"));
+  apiRouter.use("/agent-invocation", unavailable("Agent automations"));
 
   return application;
+}
+
+/**
+ * Answers before Express exists.
+ *
+ * Both failure paths here run when the Express app could not be built, so they
+ * cannot use `response.status().json()` - those are Express helpers. Vercel's
+ * Node runtime happens to add its own, but relying on them means the code that
+ * reports a misconfiguration is the code most likely to throw while doing it.
+ * Plain Node works everywhere.
+ */
+function fail(response, status, body) {
+  const payload = JSON.stringify(body);
+  response.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": Buffer.byteLength(payload),
+  });
+  response.end(payload);
 }
 
 module.exports = (request, response) => {
   const problem = persistenceProblem();
   if (problem)
-    return response.status(500).json({ error: "misconfigured", message: problem });
+    return fail(response, 500, { error: "misconfigured", message: problem });
 
   if (!app && !bootError) {
     try {
@@ -154,9 +175,12 @@ module.exports = (request, response) => {
     }
   }
   if (bootError)
-    return response
-      .status(500)
-      .json({ error: "boot_failed", message: bootError.message });
+    // The reason stays in the logs. A customer gets nothing they could use,
+    // and no stack trace.
+    return fail(response, 500, {
+      error: "boot_failed",
+      message: "The application could not start. This has been logged.",
+    });
 
   return app(request, response);
 };
