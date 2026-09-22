@@ -70,7 +70,7 @@ or websites. See "Founder control plane" below.
 - **Founder control plane** — `server/business/founder/`, `/founder` in the
   frontend, documented in `DEPLOYMENT.md` §2a. See below.
 - **The whole commercial loop, proved on Postgres through the real Vercel
-  entry point** — `scripts/production-loop-verification.cjs`. 74 checks, 0
+  entry point** — `scripts/production-loop-verification.cjs`. 86 checks, 0
   failures, 1 honestly blocked. See "Proof, not assertion" below.
 - **A customer lands somewhere usable** — creating an account provisions that
   business its first workspace. Customers are `default` role and cannot create
@@ -86,6 +86,13 @@ or websites. See "Founder control plane" below.
   the product says so; self-hosted, agents work unchanged.
 - **Retrieval with no second service** — `VECTOR_DB` defaults to `pgvector` on
   the serverless runtime, reusing the same `DATABASE_URL`.
+- **Nothing under `/api` answers with an HTML error page.** The serverless
+  build mounts fewer endpoint groups than the long-running server; the ones the
+  product has but this runtime cannot host answer 503 with a plan sentence, and
+  anything that is not a route answers a plain JSON 404 - deliberately not a
+  plan message, which would tell someone probing `/api/signup` that signup
+  exists somewhere. An Express error handler catches the rest so no stack trace
+  can reach a browser.
 
 ## Currently implementing
 
@@ -109,7 +116,7 @@ point, not a test harness — over a real socket.
 
 ```
 DATABASE_URL=postgresql://… node scripts/production-loop-verification.cjs
-COMMERCIAL LOOP: 74 passed, 0 failed, 1 blocked
+COMMERCIAL LOOP: 86 passed, 0 failed, 1 blocked
 ```
 
 Among the 70: a founder creates a customer; the customer signs in and lands in
@@ -139,7 +146,7 @@ Two AI sections, deliberately separate:
 ```
 npx jest                       1531 passed, 3 failed (ffmpeg), 1534 total
 npx jest __tests__/business     439 passed, 439 total   (run from server/)
-node scripts/production-loop-verification.cjs   74 passed, 0 failed, 1 blocked
+node scripts/production-loop-verification.cjs   86 passed, 0 failed, 1 blocked
 ./scripts/final-verification.sh 19 passed, 1 failed, 3 blocked
 ./scripts/operator-backup-test.sh   18 passed, 0 failed
 ```

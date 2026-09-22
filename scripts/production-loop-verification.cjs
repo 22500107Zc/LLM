@@ -620,6 +620,47 @@ function modelProviderConfigured() {
     else process.env[key] = restore[key];
   await endpoint.close();
 
+  // ------------------------------------------- endpoints this build does not host
+  //
+  // The frontend calls endpoint groups the long-running server has and this
+  // one does not. Each has to come back as readable JSON, because a browser
+  // that asked for JSON and got an HTML error page shows the customer a
+  // broken screen with nothing to read.
+  section("Endpoints this runtime does not host");
+  for (const [urlPath, what] of [
+    ["/api/document/upload", "document upload"],
+    ["/api/agent-invocation/abc", "agent automations"],
+    ["/api/mcp-servers/list", "an endpoint group that is not mounted"],
+    ["/api/scheduled-jobs", "another that is not mounted"],
+    ["/api/experimental/anything", "a third that is not mounted"],
+  ]) {
+    const answer = await call("GET", urlPath, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    check(
+      `${what} answers JSON, not an HTML error page`,
+      answer.status === 503 && typeof answer.payload?.message === "string",
+      `${answer.status} ${JSON.stringify(answer.payload)?.slice(0, 60)}`
+    );
+    check(
+      `${what} says something a customer can read`,
+      /plan|support/i.test(answer.payload?.message ?? ""),
+      answer.payload?.message ?? ""
+    );
+  }
+
+  // A path that is not a route must not imply a feature exists. Answering
+  // /api/signup with "not on your plan yet" would tell someone probing for a
+  // way in that signup exists somewhere in this product. It does not.
+  for (const missing of ["/api/founder/does-not-exist", "/api/not-a-route"]) {
+    const answer = await call("GET", missing);
+    check(
+      `${missing} is a plain not-found, not a plan message`,
+      answer.status === 404 && !/plan/i.test(JSON.stringify(answer.payload)),
+      `${answer.status} ${JSON.stringify(answer.payload)}`
+    );
+  }
+
   // ------------------------------------------- what an unconfigured deploy says
   //
   // Before this deployment has a database there are no customers, but the

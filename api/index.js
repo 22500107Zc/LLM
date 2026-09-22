@@ -170,6 +170,58 @@ function build() {
   apiRouter.use("/document", unavailable("Document upload"));
   apiRouter.use("/agent-invocation", unavailable("Agent automations"));
 
+  // Endpoint groups the product has and this runtime does not mount.
+  //
+  // Each of these exists in the long-running server. Here they would need a
+  // filesystem, a websocket or a second service, so they are not mounted -
+  // and without this the call lands on Express's default handler and the
+  // browser gets an HTML error page where it asked for JSON, which a customer
+  // sees as a screen that simply broke.
+  const NOT_ON_THIS_RUNTIME = [
+    "/ext",
+    "/model-routers",
+    "/embed",
+    "/embeds",
+    "/utils",
+    "/agent-skills",
+    "/agent-flows",
+    "/mcp-servers",
+    "/mobile",
+    "/web-push",
+    "/telegram",
+    "/scheduled-jobs",
+    "/memories",
+    "/community-hub",
+    "/browser-extension",
+    "/experimental",
+    "/v1",
+  ];
+  for (const prefix of NOT_ON_THIS_RUNTIME)
+    apiRouter.use(prefix, unavailable("That feature"));
+
+  // Anything else under /api is simply not a route. Saying "not on your plan"
+  // here would be worse than useless - it would tell someone probing
+  // /api/signup that signup exists somewhere, which it does not.
+  apiRouter.use((_request, response) =>
+    response.status(404).json({ error: "not_found" })
+  );
+
+  // Nothing below Express should ever reach a customer as a stack trace.
+  application.use((error, request, response, _next) => {
+    console.error(
+      "[vercel] unhandled error:",
+      request.method,
+      request.url,
+      error
+    );
+    if (response.headersSent) return response.end();
+    return response.status(500).json({
+      error: "server_error",
+      message:
+        "Something went wrong on our side. It has been logged - please try again.",
+    });
+  });
+
   return application;
 }
 
