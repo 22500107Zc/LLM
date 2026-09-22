@@ -91,6 +91,35 @@ model users {
   desktop_mobile_devices       desktop_mobile_devices[]
   workspace_parsed_files       workspace_parsed_files[]
   memories                     memories[]
+  business_customer            business_customers?
+}
+
+/// A customer the founder created and authorized.
+///
+/// One row per paying business. It holds only the business information the
+/// founder records; the login email and password hash live on the `users` row
+/// it points at, so the product has exactly one credential store.
+///
+/// Access state is NOT here either - it is `users.suspended`, which the
+/// inherited request validation already checks on every authenticated request.
+/// A second copy of that flag would eventually disagree with the one actually
+/// being enforced.
+///
+/// Nothing about Stripe appears in this model. Payment happens outside the
+/// application; `payment_note` is the founder's own record of it and no code
+/// reads it to decide access.
+model business_customers {
+  id            Int      @id @default(autoincrement())
+  user_id       Int      @unique
+  business_name String
+  contact_name  String?
+  notes         String?
+  payment_note  String?
+  createdAt     DateTime @default(now())
+  lastUpdatedAt DateTime @default(now())
+  user          users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([business_name])
 }
 
 model recovery_codes {

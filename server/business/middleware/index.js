@@ -97,7 +97,7 @@ function createRateLimiter({
       if (bucket.resetAt <= now) buckets.delete(key);
   }, windowMs).unref?.();
 
-  return function rateLimit(request, response, next) {
+  function rateLimit(request, response, next) {
     const now = Date.now();
     const key = String(keyFn(request) ?? "unknown");
     let bucket = buckets.get(key);
@@ -126,7 +126,13 @@ function createRateLimiter({
     }
 
     return next();
-  };
+  }
+
+  // A suite that exercises a limited route dozens of times would otherwise
+  // trip the limiter and fail for the wrong reason. Nothing in the running
+  // application calls this.
+  rateLimit.reset = () => buckets.clear();
+  return rateLimit;
 }
 
 /** Shared limiter for the public lead-capture and escalation endpoints. */

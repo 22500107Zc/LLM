@@ -1644,9 +1644,6 @@ function dumpENV() {
     // Subscription enforcement policy
     "PLAN_AMOUNT_CENTS",
     "BILLING_ENFORCEMENT_ENABLED",
-    // Without this, saving any setting would silently un-restrict a deployment
-    // that has not paid yet.
-    "BILLING_REQUIRE_ACTIVATION",
     "BILLING_GRACE_PERIOD_DAYS",
     "BILLING_RESTRICT_INTERNAL_CHAT",
     "BILLING_RESTRICT_PUBLIC_AGENTS",
@@ -1667,7 +1664,6 @@ function dumpENV() {
     // settings save. The hash is never returned by any route.
     "FOUNDER_CONSOLE_ENABLED",
     "FOUNDER_PASSWORD_HASH",
-    "PLATFORM_STATE_DIR",
   ];
 
   // Simple sanitization of each value to prevent ENV injection via newline or quote escaping.

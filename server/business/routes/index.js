@@ -11,10 +11,6 @@ const { platformRoutes } = require("./platform");
 const { publicCaptureRoutes } = require("./publicCapture");
 const { knowledgeRoutes } = require("./knowledge");
 const { valueRoutes } = require("./value");
-const {
-  requireActiveSubscription,
-  requireActiveSubscriptionForPublic,
-} = require("../middleware/billingGate");
 
 /**
  * Mounts the commercial business API.
@@ -57,46 +53,37 @@ function businessEndpoints(app) {
   // ---- Public visitor capture (mounted alongside upstream's embed API) ----
   publicCaptureRoutes(app);
 
-  // ---- Subscription enforcement ------------------------------------------
-  // Attached as path-scoped middleware rather than edited into each upstream
-  // chat route, so no upstream endpoint file is touched. When the deployment
-  // is not restricted these are a cached no-op.
+  // ---- Application access -------------------------------------------------
   //
-  // Only AI *usage* is gated. Reading data, administration and billing stay
-  // available so an owner can always resolve payment - and nothing is deleted.
-  app.use("/workspace/:slug/stream-chat", requireActiveSubscription);
-  app.use(
-    "/workspace/:slug/thread/:threadSlug/stream-chat",
-    requireActiveSubscription
-  );
-  app.use("/v1/workspace/:slug/chat", requireActiveSubscription);
-  app.use("/v1/workspace/:slug/stream-chat", requireActiveSubscription);
-  // The developer API's THREAD variants reach ApiChatHandler exactly like the
-  // workspace ones. Leaving them out left a restricted deployment able to keep
-  // using the model by calling these directly.
-  app.use(
-    "/v1/workspace/:slug/thread/:threadSlug/chat",
-    requireActiveSubscription
-  );
-  app.use(
-    "/v1/workspace/:slug/thread/:threadSlug/stream-chat",
-    requireActiveSubscription
-  );
-  app.use("/v1/openai/chat/completions", requireActiveSubscription);
-
-  // Public website agents get the visitor-safe abort shape instead, so a
-  // customer's website never leaks the deployment's billing state.
-  app.use("/embed/:embedId/stream-chat", requireActiveSubscriptionForPublic);
+  // There is deliberately NO subscription gate on any AI path.
+  //
+  // Access to this product is decided by the founder, not by a payment
+  // processor. The founder confirms payment outside the application, creates
+  // the customer's account, and disables it if they stop paying. Stripe never
+  // sees an authorization decision, and the application needs no Stripe
+  // credential to let a paying customer in.
+  //
+  // Enforcement is the inherited request validation in
+  // utils/middleware/validatedRequest.js, which re-reads the user from the
+  // database on EVERY authenticated request and refuses a suspended one with
+  // 401. That is why disabling a customer ends their current session rather
+  // than lasting until their token expires - and why there is nothing here to
+  // bypass by calling an endpoint directly.
 }
 
 /**
- * Every path where AI usage is gated.
+ * Every endpoint that reaches a model.
  *
- * Exported so a test can assert this list still covers every endpoint that
- * reaches a model. A new chat route added upstream without a mount here would
- * otherwise be a silent way to use the product without paying.
+ * Exported so a test can assert each one is accounted for. Access to all of
+ * them is decided by founder authorization - `validatedRequest` refuses a
+ * suspended customer on every request - so what this list guards is that a new
+ * upstream chat route cannot appear unnoticed and end up reachable without a
+ * customer session at all.
+ *
+ * `public` is the one deliberate exception: the website embed widget serves a
+ * customer's own visitors, who have no account by design.
  */
-const GATED_AI_PATHS = Object.freeze({
+const AI_ENDPOINTS = Object.freeze({
   authenticated: Object.freeze([
     "/workspace/:slug/stream-chat",
     "/workspace/:slug/thread/:threadSlug/stream-chat",
@@ -109,4 +96,4 @@ const GATED_AI_PATHS = Object.freeze({
   public: Object.freeze(["/embed/:embedId/stream-chat"]),
 });
 
-module.exports = { businessEndpoints, GATED_AI_PATHS };
+module.exports = { businessEndpoints, AI_ENDPOINTS };

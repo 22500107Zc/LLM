@@ -130,9 +130,6 @@ function listDeployments() {
       // Presence only. The value itself is a secret and never leaves here.
       hasDeploymentId: !!envValue(slug, "DEPLOYMENT_ID"),
       paymentLinkConfigured: !!envValue(slug, "STRIPE_PAYMENT_LINK"),
-      // Provisioned as unpaid, waiting for the webhook to activate it.
-      awaitingActivation:
-        envValue(slug, "BILLING_REQUIRE_ACTIVATION") === "true",
       enforcementEnabled:
         envValue(slug, "BILLING_ENFORCEMENT_ENABLED") === "true",
       stripeConfigured: !!envValue(slug, "STRIPE_SECRET_KEY"),
@@ -235,11 +232,9 @@ STRIPE_PRODUCT_ID=
 STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID=
 STRIPE_CUSTOMER_ID=
 STRIPE_SUBSCRIPTION_ID=
-# A new business starts UNPAID. Enforcement is on and there is no subscription
-# yet, so AI usage is suspended until the Stripe webhook records the first
-# payment. Nothing else is restricted and no data is affected.
-BILLING_ENFORCEMENT_ENABLED=true
-BILLING_REQUIRE_ACTIVATION=true
+# Access to the product is decided by the founder in the founder console, not
+# by Stripe. This flag is legacy reporting only and is off.
+BILLING_ENFORCEMENT_ENABLED=false
 BILLING_GRACE_PERIOD_DAYS=7
 
 # --- AI provider (the CUSTOMER'S OWN credentials) ---------------------------

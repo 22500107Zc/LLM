@@ -4,7 +4,7 @@ import { API_BASE } from "@/utils/constants";
  * Client for the founder control plane (/api/founder/*).
  *
  * Deliberately NOT built on `baseHeaders()`. The customer API authenticates
- * with a JWT this application keeps in localStorage; the founder plane
+ * with a JWT this application keeps in browser storage; the founder plane
  * authenticates with an HttpOnly cookie the browser holds and this code cannot
  * read. Mixing the two would mean a customer token travelling to founder
  * routes, and a founder credential sitting where a script could read it.
@@ -56,6 +56,13 @@ async function request(path, { method = "GET", body = null } = {}) {
   }
 }
 
+/** Every mutation answers the same shape so the console can stay simple. */
+function outcome({ ok, payload }) {
+  return ok
+    ? { success: true, customer: payload?.customer ?? null }
+    : { success: false, error: payload?.error ?? GENERIC_ERROR };
+}
+
 const Founder = {
   GENERIC_ERROR,
 
@@ -88,56 +95,71 @@ const Founder = {
     setCsrfToken(null);
   },
 
-  deployments: async function () {
-    const { ok, payload } = await request("/deployments");
+  // ------------------------------------------------------------ customers --
+  customers: async function () {
+    const { ok, payload } = await request("/customers");
     return ok
       ? payload
-      : { deployments: [], error: payload?.error ?? GENERIC_ERROR };
+      : { customers: [], counts: {}, error: payload?.error ?? GENERIC_ERROR };
   },
 
-  deployment: async function (slug) {
+  customer: async function (id) {
     const { ok, payload } = await request(
-      `/deployments/${encodeURIComponent(slug)}`
+      `/customers/${encodeURIComponent(id)}`
     );
-    return ok ? payload : { error: payload?.error ?? GENERIC_ERROR };
+    return ok ? payload.customer : null;
   },
 
-  provision: async function (input) {
-    const { ok, payload } = await request("/deployments", {
-      method: "POST",
-      body: input,
-    });
-    return ok
-      ? payload
-      : {
-          success: false,
-          problems: payload?.problems ?? [payload?.error ?? GENERIC_ERROR],
-        };
-  },
-
-  paymentLink: async function (slug, email = "") {
-    const query = email ? `?email=${encodeURIComponent(email)}` : "";
-    const { payload } = await request(
-      `/deployments/${encodeURIComponent(slug)}/payment-link${query}`
+  createCustomer: async function (input) {
+    return outcome(
+      await request("/customers", { method: "POST", body: input })
     );
-    return payload ?? { success: false, error: GENERIC_ERROR };
   },
 
-  savePaymentLink: async function (slug, paymentLink) {
+  updateCustomer: async function (id, input) {
+    return outcome(
+      await request(`/customers/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: input,
+      })
+    );
+  },
+
+  changeEmail: async function (id, email) {
+    return outcome(
+      await request(`/customers/${encodeURIComponent(id)}/email`, {
+        method: "POST",
+        body: { email },
+      })
+    );
+  },
+
+  resetPassword: async function (id, password) {
+    return outcome(
+      await request(`/customers/${encodeURIComponent(id)}/password`, {
+        method: "POST",
+        body: { password },
+      })
+    );
+  },
+
+  setAccess: async function (id, access) {
+    return outcome(
+      await request(`/customers/${encodeURIComponent(id)}/access`, {
+        method: "POST",
+        body: { access },
+      })
+    );
+  },
+
+  removeCustomer: async function (id, confirmBusinessName) {
     const { ok, payload } = await request(
-      `/deployments/${encodeURIComponent(slug)}/payment-link`,
-      { method: "POST", body: { paymentLink } }
+      `/customers/${encodeURIComponent(id)}`,
+      { method: "DELETE", body: { confirmBusinessName } }
     );
     return ok
-      ? payload
+      ? { success: true }
       : { success: false, error: payload?.error ?? GENERIC_ERROR };
-  },
-
-  events: async function (slug) {
-    const { payload } = await request(
-      `/deployments/${encodeURIComponent(slug)}/events`
-    );
-    return payload ?? { reachable: false, reason: GENERIC_ERROR };
   },
 
   audit: async function () {

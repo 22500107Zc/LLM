@@ -1,7 +1,6 @@
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const { AuditLog } = require("../models/audit");
-const provisioning = require("../services/provisioning");
 
 /**
  * Founder authentication.
@@ -17,8 +16,8 @@ const provisioning = require("../services/provisioning");
  *     HttpOnly cookie. Nothing about it is derived from the password, so a
  *     stolen token cannot be turned back into one.
  *   - Failed attempts are rate limited per address, with a lockout.
- *   - The console refuses to switch on at all unless it has somewhere to act:
- *     a state directory. A customer's own deployment has none.
+ *   - The console is off unless FOUNDER_CONSOLE_ENABLED and a hash are both
+ *     set, and every founder route answers 404 when it is off.
  */
 
 const COOKIE_NAME = "founder_session";
@@ -59,12 +58,6 @@ function availability() {
       available: false,
       reason:
         "The founder console is enabled but FOUNDER_PASSWORD_HASH is not set.",
-    };
-  if (!provisioning.stateDirAvailable())
-    return {
-      available: false,
-      reason:
-        "The founder console has no deployment state directory to manage. Set PLATFORM_STATE_DIR on the host that holds deployments/.",
     };
   return { available: true };
 }

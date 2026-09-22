@@ -2,9 +2,7 @@ const express = require("express");
 const { reqBody } = require("../../utils/http");
 const { AuditLog } = require("../models/audit");
 const { createRateLimiter, safeHandler } = require("../middleware");
-const provisioning = require("../services/provisioning");
-const { buildPaymentLink } = require("../billing/service");
-const { readStatus } = require("./deploymentStatus");
+const { Customer, ACCESS } = require("../models/customer");
 const auth = require("./auth");
 
 /**
@@ -12,28 +10,33 @@ const auth = require("./auth");
  *
  * WHAT THIS IS
  *
- * One operator, one password, a list of the businesses they run, and the four
- * things they actually need to do: provision a new one, hand it the right
- * Stripe Payment Link, see whether it has paid, and see the payments that
- * could not be matched.
+ * One application, one operator, one password. The founder decides who is
+ * allowed into the product. A customer is an account in this application - not
+ * a container, not a deployment, not another website.
  *
- * WHAT IT DELIBERATELY IS NOT
+ * THE WORKFLOW IT SERVES
  *
- * It is not a tenant admin panel: it never reads a customer's conversations,
- * documents or users. It is not a remote shell: the only privileged operation
- * in the whole platform - starting a container - stays in the operator CLI,
- * and this returns the exact command rather than running it. It is not a way
- * around the billing gate: nothing here can mark a deployment paid. Only the
- * Stripe webhook does that, and only from an event it can prove belongs to
- * that deployment.
+ * Payment happens outside the application: the founder sends a Stripe-hosted
+ * Payment Link by email and confirms the money arrived. Then, here, they
+ * create the account with the email and password the customer chose. The
+ * customer signs in to the same application everyone else uses.
+ *
+ * If the customer stops paying, the founder disables them. If they resume, the
+ * founder restores them. Founder authority is the source of truth.
+ *
+ * NO STRIPE
+ *
+ * Nothing in this file imports Stripe, reads a Stripe key, or consults a
+ * payment state. An account works because the founder created it and has not
+ * disabled it - for no other reason, and the product needs no Stripe
+ * credential to let a paying customer in.
  *
  * HOW IT IS SEPARATED
  *
- * Mounted on its own prefix, before the customer API router, with its own
+ * Mounted on its own prefix before the customer API router, with its own
  * authentication. A customer's JWT means nothing here: `requireFounder` looks
- * only at the founder cookie and the server-side session store. And when the
- * console is not configured on this host, every route answers 404, so a
- * customer's own deployment does not even admit these paths exist.
+ * only at the founder cookie and the server-side session store. When the
+ * console is not configured, every route answers 404.
  */
 
 /** Login is the one unauthenticated write. Limited hard, on top of the
@@ -53,25 +56,6 @@ function body(request) {
   }
 }
 
-/** Serializes a deployment row for the console. Presence flags only - no
- * secret, and never the deployment identifier itself. */
-function publicRow(row) {
-  return {
-    slug: row.slug,
-    name: row.name,
-    domain: row.domain,
-    port: row.port,
-    project: row.project,
-    provisionedAt: row.provisionedAt,
-    hasDeploymentId: row.hasDeploymentId,
-    paymentLinkConfigured: row.paymentLinkConfigured,
-    stripeConfigured: row.stripeConfigured,
-    providerConfigured: row.providerConfigured,
-    awaitingActivation: row.awaitingActivation,
-    enforcementEnabled: row.enforcementEnabled,
-  };
-}
-
 function founderRoutes(app) {
   if (!app) return;
 
@@ -81,8 +65,8 @@ function founderRoutes(app) {
   /**
    * Whether the console exists here and whether this browser is signed in.
    *
-   * Unauthenticated on purpose: the login page needs it. It returns no secret,
-   * no hint about the password, and no deployment data.
+   * Unauthenticated on purpose: the login page needs it. It returns no secret
+   * and no hint about the password.
    */
   router.get(
     "/session",
@@ -99,9 +83,8 @@ function founderRoutes(app) {
       response.status(200).json({
         available: true,
         authenticated: !!session,
-        // The CSRF token is not a credential on its own - it is useless
-        // without the HttpOnly session cookie - and the console needs it to
-        // make any change.
+        // Useless without the HttpOnly session cookie, which no script can
+        // read - and the console needs it to make any change.
         csrfToken: session?.csrf ?? null,
         expiresAt: session ? new Date(session.expiresAt).toISOString() : null,
       });
@@ -118,8 +101,7 @@ function founderRoutes(app) {
       if (!result.ok)
         return response.status(result.retryAfterMs ? 429 : 401).json({
           success: false,
-          // Never says whether the password was close, long enough, or
-          // whether a hash is even configured beyond "not enabled".
+          // Never says whether the password was close or long enough.
           error: result.error,
         });
 
@@ -142,9 +124,8 @@ function founderRoutes(app) {
     safeHandler(async (_request, response) => {
       const session = response.locals.founderSession;
       auth.destroySession(session?.token);
-      // The attributes have to match the cookie that was set, or some browsers
-      // keep it. The server-side session is gone either way, which is the
-      // control - this just stops a dead cookie being sent back.
+      // Attributes must match the cookie that was set or some browsers keep
+      // it. The server-side session is gone either way.
       const { maxAge: _ignored, ...attributes } = auth.cookieOptions();
       response.clearCookie(auth.COOKIE_NAME, attributes);
       await AuditLog.log({
@@ -156,204 +137,235 @@ function founderRoutes(app) {
     })
   );
 
-  // --------------------------------------------------------- deployments --
+  // ----------------------------------------------------------- customers --
   router.get(
-    "/deployments",
+    "/customers",
     [auth.requireFounder],
     safeHandler(async (_request, response) => {
-      const deployments = provisioning.listDeployments().map(publicRow);
+      const customers = await Customer.list();
       response.status(200).json({
-        deployments,
-        stateDir: provisioning.stateDir(),
+        customers,
+        counts: {
+          total: customers.length,
+          active: customers.filter((c) => c.access === ACCESS.ACTIVE).length,
+          disabled: customers.filter((c) => c.access === ACCESS.DISABLED)
+            .length,
+        },
       });
     })
   );
 
-  /**
-   * One deployment, with its live state read over loopback.
-   *
-   * The configuration comes off disk; whether it is running, whether it has
-   * paid, and which payments could not be matched come from the deployment
-   * itself. A deployment that is not running is a normal answer, not an error.
-   */
   router.get(
-    "/deployments/:slug",
+    "/customers/:id",
     [auth.requireFounder],
     safeHandler(async (request, response) => {
-      const slug = String(request.params.slug ?? "");
-      const row = provisioning.getDeployment(slug);
-      if (!row) return response.status(404).json({ error: "Not found." });
-
-      const live = await readStatus(slug);
-      response.status(200).json({
-        deployment: publicRow(row),
-        live,
-        // The operator runs this on the host; the console never does.
-        nextCommand: `./scripts/operator.sh status ${row.slug}`,
-      });
+      const customer = await Customer.get(request.params.id);
+      if (!customer) return response.status(404).json({ error: "Not found." });
+      response.status(200).json({ customer });
     })
   );
 
   /**
-   * Provisions a new business.
+   * Creates a customer account.
    *
-   * This writes configuration and nothing else: no process is spawned, no
-   * shell is interpolated, nothing talks to Docker. Starting the container is
-   * a privileged host operation and stays with the operator CLI, so the
-   * response carries the exact command to run rather than running it.
+   * The founder supplies the login email and the password the customer chose.
+   * The password is hashed by the product's own user model and the plaintext
+   * is never stored, logged or audited.
    */
   router.post(
-    "/deployments",
+    "/customers",
     [auth.requireFounder],
     safeHandler(async (request, response) => {
       const input = body(request);
-      const result = provisioning.provision({
-        slug: input.slug,
-        name: input.name,
-        domain: input.domain,
-        port: input.port,
-        paymentLink: input.paymentLink,
+      const { customer, error } = await Customer.create({
+        businessName: input.businessName,
+        email: input.email,
+        password: input.password,
+        contactName: input.contactName,
+        notes: input.notes,
+        paymentNote: input.paymentNote,
       });
 
-      if (!result.success) {
-        await AuditLog.log({
-          action: "founder.provision_refused",
-          category: AuditLog.CATEGORIES.SETTINGS,
-          resource: "deployment",
-          resourceId: String(input.slug ?? "").slice(0, 64),
-          metadata: { problems: result.problems ?? [] },
-        });
-        return response
-          .status(400)
-          .json({ success: false, problems: result.problems ?? [] });
-      }
+      if (!customer)
+        return response.status(400).json({ success: false, error });
 
       await AuditLog.log({
-        action: "founder.provisioned_deployment",
-        category: AuditLog.CATEGORIES.SETTINGS,
-        resource: "deployment",
-        resourceId: result.deployment.slug,
+        action: "founder.customer_created",
+        category: AuditLog.CATEGORIES.USERS,
+        resource: "customer",
+        resourceId: String(customer.id),
+        // The email is the account identifier, so it belongs in the trail.
+        // The password does not appear here in any form.
         metadata: {
-          domain: result.deployment.domain,
-          port: result.deployment.port,
-          // Recorded so the trail shows the new business could not serve AI
-          // until a payment activated it.
-          awaitingActivation: result.deployment.awaitingActivation,
+          businessName: customer.businessName,
+          loginEmail: customer.loginEmail,
         },
       });
 
-      response.status(201).json({
-        success: true,
-        deployment: publicRow(result.deployment),
-        nextCommand: result.nextCommand,
-      });
+      response.status(201).json({ success: true, customer });
     })
   );
 
-  // -------------------------------------------------------- payment link --
-  /**
-   * The Stripe-hosted Payment Link for this business, bound to it.
-   *
-   * Built from that deployment's own configured link and its DEPLOYMENT_ID, so
-   * the `client_reference_id` is the one its webhook will match on. Handing a
-   * customer a link without it is how a payment ends up unmatched, which is
-   * exactly the failure this console exists to make visible.
-   */
-  router.get(
-    "/deployments/:slug/payment-link",
+  /** Business information. Credentials and access have their own routes so
+   * each is an explicit, separately auditable act. */
+  router.put(
+    "/customers/:id",
     [auth.requireFounder],
     safeHandler(async (request, response) => {
-      const slug = String(request.params.slug ?? "");
-      const row = provisioning.getDeployment(slug);
-      if (!row) return response.status(404).json({ error: "Not found." });
-
-      const result = buildPaymentLink({
-        configuredLink: provisioning.envValue(slug, "STRIPE_PAYMENT_LINK"),
-        deploymentId: provisioning.envValue(slug, "DEPLOYMENT_ID"),
-        email: request.query.email ? String(request.query.email) : "",
+      const input = body(request);
+      const { customer, error } = await Customer.update(request.params.id, {
+        businessName: input.businessName,
+        contactName: input.contactName,
+        notes: input.notes,
+        paymentNote: input.paymentNote,
       });
-
-      if (result.success)
-        await AuditLog.log({
-          action: "founder.payment_link_viewed",
-          category: AuditLog.CATEGORIES.BILLING,
-          resource: "deployment",
-          resourceId: slug,
-        });
-
-      response.status(result.success ? 200 : 400).json(result);
-    })
-  );
-
-  /** Records the Stripe-hosted Payment Link the operator created in Stripe. */
-  router.post(
-    "/deployments/:slug/payment-link",
-    [auth.requireFounder],
-    safeHandler(async (request, response) => {
-      const slug = String(request.params.slug ?? "");
-      const row = provisioning.getDeployment(slug);
-      if (!row) return response.status(404).json({ error: "Not found." });
-
-      const { paymentLink = "" } = body(request);
-      const result = provisioning.setPaymentLink(slug, paymentLink);
-      if (!result.success)
+      if (!customer)
         return response
-          .status(400)
-          .json({ success: false, error: result.error });
+          .status(error === "No such customer." ? 404 : 400)
+          .json({ success: false, error });
 
       await AuditLog.log({
-        action: "founder.payment_link_updated",
-        category: AuditLog.CATEGORIES.BILLING,
-        resource: "deployment",
-        resourceId: slug,
+        action: "founder.customer_updated",
+        category: AuditLog.CATEGORIES.USERS,
+        resource: "customer",
+        resourceId: String(customer.id),
       });
-
-      response.status(200).json({
-        success: true,
-        // The running container reads its env at boot, so the change is not
-        // live until it is restarted. Saying so beats a link that silently
-        // does not apply.
-        nextCommand: `./scripts/operator.sh update ${slug}`,
-      });
+      response.status(200).json({ success: true, customer });
     })
   );
 
-  // ------------------------------------------------------ payment events --
-  /**
-   * Payment events that need a human, for one deployment.
-   *
-   * Inspection only. Nothing here can bind a payment to a deployment: an
-   * unmatched event is a question for the operator to answer in Stripe, and
-   * rebinding it from a web form is exactly the kind of automation that could
-   * activate the wrong business.
-   */
-  router.get(
-    "/deployments/:slug/events",
+  /** Changes the authorized login email. The old address stops working. */
+  router.post(
+    "/customers/:id/email",
     [auth.requireFounder],
     safeHandler(async (request, response) => {
-      const slug = String(request.params.slug ?? "");
-      if (!provisioning.getDeployment(slug))
-        return response.status(404).json({ error: "Not found." });
+      const { email = "" } = body(request);
+      const { customer, error } = await Customer.setEmail(
+        request.params.id,
+        email
+      );
+      if (!customer)
+        return response
+          .status(error === "No such customer." ? 404 : 400)
+          .json({ success: false, error });
 
-      const live = await readStatus(slug);
-      if (!live.status)
-        return response.status(200).json({
-          reachable: live.reachable,
-          reason: live.reason,
-          events: null,
-        });
-
-      response.status(200).json({
-        reachable: true,
-        events: live.status.events,
-        // Stated plainly so the console never implies it can fix one.
-        resolution:
-          "Unmatched events are inspected here and resolved in Stripe. Nothing in this console can activate a deployment.",
+      await AuditLog.log({
+        action: "founder.customer_email_changed",
+        category: AuditLog.CATEGORIES.SECURITY,
+        resource: "customer",
+        resourceId: String(customer.id),
+        metadata: { loginEmail: customer.loginEmail },
       });
+      response.status(200).json({ success: true, customer });
     })
   );
 
-  // ----------------------------------------------------------- audit ------
+  /**
+   * Sets a new password.
+   *
+   * There is no route that reads a password back, and there could not be one:
+   * only a bcrypt hash exists and it does not reverse.
+   */
+  router.post(
+    "/customers/:id/password",
+    [auth.requireFounder],
+    safeHandler(async (request, response) => {
+      const { password = "" } = body(request);
+      const { customer, error } = await Customer.setPassword(
+        request.params.id,
+        password
+      );
+      if (!customer)
+        return response
+          .status(error === "No such customer." ? 404 : 400)
+          .json({ success: false, error });
+
+      await AuditLog.log({
+        action: "founder.customer_password_reset",
+        category: AuditLog.CATEGORIES.SECURITY,
+        resource: "customer",
+        resourceId: String(customer.id),
+        // No password, no length, no hash.
+      });
+      response.status(200).json({ success: true, customer });
+    })
+  );
+
+  /**
+   * Turns application access on or off.
+   *
+   * This is APPLICATION ACCESS, not a billing state. It writes the flag the
+   * product's request validation already checks on every authenticated
+   * request, so disabling a customer ends their current session too - they do
+   * not keep working until their token expires.
+   */
+  router.post(
+    "/customers/:id/access",
+    [auth.requireFounder],
+    safeHandler(async (request, response) => {
+      const { access = "" } = body(request);
+      const { customer, error } = await Customer.setAccess(
+        request.params.id,
+        access
+      );
+      if (!customer)
+        return response
+          .status(error === "No such customer." ? 404 : 400)
+          .json({ success: false, error });
+
+      await AuditLog.log({
+        action:
+          customer.access === ACCESS.DISABLED
+            ? "founder.customer_disabled"
+            : "founder.customer_restored",
+        category: AuditLog.CATEGORIES.SECURITY,
+        resource: "customer",
+        resourceId: String(customer.id),
+        metadata: { access: customer.access },
+      });
+      response.status(200).json({ success: true, customer });
+    })
+  );
+
+  /**
+   * Permanently removes a customer and their login.
+   *
+   * Destructive and not reversible, so it requires the business name typed
+   * back. Disabling is the reversible option and the console says so.
+   */
+  router.delete(
+    "/customers/:id",
+    [auth.requireFounder],
+    safeHandler(async (request, response) => {
+      const { confirmBusinessName = "" } = body(request);
+      const existing = await Customer.get(request.params.id);
+      if (!existing) return response.status(404).json({ error: "Not found." });
+
+      if (String(confirmBusinessName).trim() !== String(existing.businessName))
+        return response.status(400).json({
+          success: false,
+          error:
+            "Type the business name exactly to confirm. Disabling is reversible; this is not.",
+        });
+
+      const { success, error } = await Customer.remove(request.params.id);
+      if (!success) return response.status(400).json({ success: false, error });
+
+      await AuditLog.log({
+        action: "founder.customer_removed",
+        category: AuditLog.CATEGORIES.USERS,
+        resource: "customer",
+        resourceId: String(existing.id),
+        metadata: {
+          businessName: existing.businessName,
+          loginEmail: existing.loginEmail,
+        },
+      });
+      response.status(200).json({ success: true });
+    })
+  );
+
+  // ---------------------------------------------------------------- audit --
   /** What the founder has done, from the existing audit trail. */
   router.get(
     "/audit",
@@ -379,5 +391,9 @@ function founderRoutes(app) {
 
   app.use("/api/founder", router);
 }
+
+/** Lets a test suite clear the login limiter between cases. Nothing in the
+ * running application calls it. */
+founderRoutes.resetRateLimit = () => loginLimiter.reset?.();
 
 module.exports = { founderRoutes };

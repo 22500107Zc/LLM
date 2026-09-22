@@ -121,7 +121,7 @@ const TRANSLATIONS = {
   login: {
     "multi-user": {
       welcome: "Welcome",
-      "placeholder-username": "Username",
+      "placeholder-username": "Email",
       "placeholder-password": "Password",
       login: "Login",
       validating: "Validating...",

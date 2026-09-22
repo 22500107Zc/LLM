@@ -1,231 +1,94 @@
 /**
- * Subscription enforcement behaviour.
+ * Application access.
  *
- * The commercial promise is specific: a failed payment warns, then suspends AI
- * usage, and NEVER deletes data or locks the owner out of billing. These tests
- * pin that behaviour down.
+ * The commercial promise used to be a billing one: pay, or AI usage is
+ * suspended. It is not any more. The founder decides who is in the product,
+ * payment is arranged outside it, and no payment processor is consulted to
+ * answer a request.
+ *
+ * What these pin down is that the wiring matches that: nothing mounts a
+ * subscription gate, the founder plane contains no Stripe, and the flag the
+ * customer model writes is the flag request validation reads.
  */
 
-function loadGate(env = {}) {
-  jest.resetModules();
-  Object.assign(process.env, {
-    BILLING_ENFORCEMENT_ENABLED: "true",
-    BILLING_GRACE_PERIOD_DAYS: "7",
-    BILLING_RESTRICT_INTERNAL_CHAT: "true",
-    BILLING_RESTRICT_PUBLIC_AGENTS: "true",
-    ...env,
-  });
-  return require("../../business/middleware/billingGate");
-}
+/**
+ * ACCESS CONTROL, AS THE PRODUCT ACTUALLY WORKS
+ *
+ * This file used to assert that a Stripe subscription decided who could use
+ * the AI. It does not any more, and these tests pin down the replacement:
+ *
+ *   The founder decides who is in the product. Payment is arranged outside the
+ *   application through a hosted link, and the application never asks Stripe
+ *   anything. `users.suspended` is the access flag, and the inherited request
+ *   validation checks it on every authenticated request.
+ *
+ * The end-to-end proof - disable a customer, watch their live session stop
+ * working on the next request - lives in `founder.test.js`, which drives a
+ * real server. These cover the structural guarantees.
+ */
 
-function mockResponse() {
-  return {
-    statusCode: null,
-    payload: null,
-    status(code) {
-      this.statusCode = code;
-      return this;
-    },
-    json(body) {
-      this.payload = body;
-      return this;
-    },
-  };
-}
+describe("no payment processor decides application access", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const SERVER_DIR = path.resolve(__dirname, "..", "..");
 
-/** Stubs the billing model so no database is required. */
-function stubAccess(access) {
-  jest.doMock("../../business/models/billing", () => {
-    const actual = jest.requireActual("../../business/models/billing");
-    return {
-      ...actual,
-      Billing: {
-        ...actual.Billing,
-        currentAccess: async () => ({
-          record: {},
-          access,
-          status: access === "restricted" ? "past_due" : "active",
-          statusLabel: access === "restricted" ? "Past due" : "Active",
-          reason: access === "restricted" ? "grace_period_expired" : null,
-          message: access === "restricted" ? "Billing is overdue." : null,
-        }),
-      },
-    };
-  });
-}
+  const read = (relative) =>
+    fs.readFileSync(path.join(SERVER_DIR, relative), "utf8");
 
-describe("requireActiveSubscription (internal AI usage)", () => {
-  afterEach(() => jest.resetModules());
+  /** Comments discuss Stripe's absence; assertions are about code. */
+  const codeOnly = (source) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
-  it("blocks internal chat with 402 when restricted", async () => {
-    stubAccess("restricted");
-    const gate = loadGate();
-    const response = mockResponse();
-    let passed = false;
-
-    await gate.requireActiveSubscription({}, response, () => {
-      passed = true;
-    });
-
-    expect(passed).toBe(false);
-    expect(response.statusCode).toBe(402);
-    expect(response.payload.error).toBe("subscription_restricted");
+  it("mounts no subscription gate on any route", () => {
+    const source = read("business/routes/index.js");
+    expect(source).not.toMatch(/app\.use\([^)]*requireActiveSubscription/);
+    expect(codeOnly(source)).not.toContain("requireActiveSubscription");
   });
 
-  it("allows internal chat during the grace period", async () => {
-    stubAccess("warning");
-    const gate = loadGate();
-    const response = mockResponse();
-    let passed = false;
-
-    await gate.requireActiveSubscription({}, response, () => {
-      passed = true;
-    });
-
-    expect(passed).toBe(true);
-    expect(response.statusCode).toBeNull();
+  it("keeps the founder plane free of Stripe entirely", () => {
+    const dir = path.join(SERVER_DIR, "business", "founder");
+    for (const file of fs.readdirSync(dir)) {
+      if (!file.endsWith(".js")) continue;
+      expect(codeOnly(read(path.join("business", "founder", file)))).not.toMatch(
+        /stripe/i
+      );
+    }
   });
 
-  it("allows internal chat when billing is healthy", async () => {
-    stubAccess("ok");
-    const gate = loadGate();
-    const response = mockResponse();
-    let passed = false;
-    await gate.requireActiveSubscription({}, response, () => {
-      passed = true;
-    });
-    expect(passed).toBe(true);
-  });
-
-  it("never blocks when enforcement is switched off, even if restricted", async () => {
-    stubAccess("restricted");
-    const gate = loadGate({ BILLING_ENFORCEMENT_ENABLED: "false" });
-    const response = mockResponse();
-    let passed = false;
-    await gate.requireActiveSubscription({}, response, () => {
-      passed = true;
-    });
-    expect(passed).toBe(true);
-  });
-
-  it("respects BILLING_RESTRICT_INTERNAL_CHAT=false", async () => {
-    stubAccess("restricted");
-    const gate = loadGate({ BILLING_RESTRICT_INTERNAL_CHAT: "false" });
-    const response = mockResponse();
-    let passed = false;
-    await gate.requireActiveSubscription({}, response, () => {
-      passed = true;
-    });
-    expect(passed).toBe(true);
-  });
-});
-
-describe("requireActiveSubscriptionForPublic (website agents)", () => {
-  afterEach(() => jest.resetModules());
-
-  it("blocks a public agent when restricted", async () => {
-    stubAccess("restricted");
-    const gate = loadGate();
-    const response = mockResponse();
-    let passed = false;
-
-    await gate.requireActiveSubscriptionForPublic({}, response, () => {
-      passed = true;
-    });
-
-    expect(passed).toBe(false);
-    expect(response.statusCode).toBe(503);
-    expect(response.payload.type).toBe("abort");
-  });
-
-  it("never reveals billing detail to a website visitor", async () => {
-    stubAccess("restricted");
-    const gate = loadGate();
-    const response = mockResponse();
-    await gate.requireActiveSubscriptionForPublic({}, response, () => {});
-
-    const serialized = JSON.stringify(response.payload).toLowerCase();
-    for (const leak of [
-      "billing",
-      "payment",
-      "subscription",
-      "past_due",
-      "overdue",
-      "invoice",
-      "stripe",
-    ])
-      expect(serialized).not.toContain(leak);
-  });
-
-  it("allows a public agent during the grace period", async () => {
-    stubAccess("warning");
-    const gate = loadGate();
-    const response = mockResponse();
-    let passed = false;
-    await gate.requireActiveSubscriptionForPublic({}, response, () => {
-      passed = true;
-    });
-    expect(passed).toBe(true);
-  });
-});
-
-describe("automations gating", () => {
-  afterEach(() => jest.resetModules());
-
-  it("halts scheduled automations when restricted", async () => {
-    stubAccess("restricted");
-    const gate = loadGate();
-    expect(await gate.automationsPermitted()).toBe(false);
-  });
-
-  it("runs automations during the grace period", async () => {
-    stubAccess("warning");
-    const gate = loadGate();
-    expect(await gate.automationsPermitted()).toBe(true);
-  });
-});
-
-describe("restriction is suspension, not deletion", () => {
-  it("the policy never enables data deletion", () => {
-    jest.resetModules();
-    const config = require("../../business/config");
-    expect(config.billingPolicy.deleteDataOnCancellation).toBe(false);
-  });
-
-  it("the restricted message tells the customer their data is retained", () => {
-    jest.resetModules();
-    process.env.BILLING_ENFORCEMENT_ENABLED = "true";
-    const { Billing } = require("../../business/models/billing");
-    const result = Billing.evaluateAccess(
-      {
-        status: "past_due",
-        past_due_since: new Date(Date.now() - 60 * 86_400_000),
-      },
-      new Date()
+  it("enforces access through the flag request validation actually reads", () => {
+    // The customer model must write the same flag `validatedRequest` checks.
+    // Any second copy of it would eventually disagree with the enforced one.
+    expect(codeOnly(read("business/models/customer.js"))).toContain("suspended");
+    expect(read("utils/middleware/validatedRequest.js")).toContain(
+      "user.suspended"
     );
-    expect(result.access).toBe("restricted");
-    expect(result.message.toLowerCase()).toContain("data is retained");
+  });
+
+  it("re-reads the user on every request rather than trusting the token", () => {
+    // This is what makes disabling immediate instead of waiting for a token to
+    // expire, and what stops a disabled customer calling endpoints directly.
+    const source = read("utils/middleware/validatedRequest.js");
+    expect(source).toMatch(/await User\.get\(\{ id: valid\.id \}\)/);
+    expect(source).toMatch(/if \(user\.suspended\)/);
   });
 });
 
-describe("every AI entry point is actually gated", () => {
+describe("every AI entry point is accounted for", () => {
   /**
-   * Middleware that works is not the same as middleware that is mounted.
+   * A new upstream chat route must not appear unnoticed.
    *
-   * The gate is attached per path, so an endpoint that reaches a model
-   * without a mount is a way to keep using the product after payment stops -
-   * and it fails silently, because everything still works. This walks the
-   * real route files and fails if any of them reaches ApiChatHandler or the
-   * chat helpers without appearing in the mount list.
+   * What is guarded now is coverage, not payment: every endpoint that reaches
+   * a model is either behind the customer session or on the deliberate public
+   * list (the website embed widget, which serves a customer's own visitors).
    */
   const fs = require("fs");
   const path = require("path");
 
   const SERVER_DIR = path.resolve(__dirname, "..", "..");
-  const { GATED_AI_PATHS } = require("../../business/routes");
-  const gated = new Set([
-    ...GATED_AI_PATHS.authenticated,
-    ...GATED_AI_PATHS.public,
+  const { AI_ENDPOINTS } = require("../../business/routes");
+  const known = new Set([
+    ...AI_ENDPOINTS.authenticated,
+    ...AI_ENDPOINTS.public,
   ]);
 
   /** Route files that expose model-invoking endpoints. */
@@ -245,8 +108,11 @@ describe("every AI entry point is actually gated", () => {
     if (!fs.existsSync(full)) return [];
     const source = fs.readFileSync(full, "utf8");
 
-    // Only files that actually invoke a model are worth scanning.
-    if (!/ApiChatHandler|streamChatWithWorkspace|chatWithWorkspace|streamChatWithForEmbed/.test(source))
+    if (
+      !/ApiChatHandler|streamChatWithWorkspace|chatWithWorkspace|streamChatWithForEmbed/.test(
+        source
+      )
+    )
       return [];
 
     return [...source.matchAll(/"(\/[^"]*chat[^"]*)"/g)]
@@ -254,86 +120,69 @@ describe("every AI entry point is actually gated", () => {
       .filter((route) => !READ_ONLY.test(route));
   }
 
-  it("mounts the gate on every model-invoking route", () => {
-    const ungated = [];
+  it("accounts for every model-invoking route", () => {
+    const unknown = [];
     for (const file of ROUTE_FILES)
       for (const route of chatEndpointsIn(file))
-        if (!gated.has(route)) ungated.push(`${file} -> ${route}`);
+        if (!known.has(route)) unknown.push(`${file} -> ${route}`);
 
-    expect(ungated).toEqual([]);
+    expect(unknown).toEqual([]);
   });
 
-  it("covers the developer API's thread endpoints", () => {
+  it("includes the developer API's thread endpoints", () => {
     // These reach ApiChatHandler exactly like the workspace ones, and were
-    // once missing, which let a restricted deployment keep using the model.
-    expect(gated.has("/v1/workspace/:slug/thread/:threadSlug/chat")).toBe(true);
-    expect(gated.has("/v1/workspace/:slug/thread/:threadSlug/stream-chat")).toBe(
-      true
-    );
+    // once missing from the list entirely.
+    expect(known.has("/v1/workspace/:slug/thread/:threadSlug/chat")).toBe(true);
+    expect(
+      known.has("/v1/workspace/:slug/thread/:threadSlug/stream-chat")
+    ).toBe(true);
   });
 
-  it("gates public website agents separately from authenticated usage", () => {
-    // A visitor must never be shown the deployment's billing state.
-    expect(GATED_AI_PATHS.public).toContain("/embed/:embedId/stream-chat");
-    expect(GATED_AI_PATHS.authenticated).not.toContain(
+  it("keeps the public embed path separate from authenticated usage", () => {
+    // A website visitor has no account by design; a customer always does.
+    expect(AI_ENDPOINTS.public).toContain("/embed/:embedId/stream-chat");
+    expect(AI_ENDPOINTS.authenticated).not.toContain(
       "/embed/:embedId/stream-chat"
     );
   });
 });
 
-describe("a newly provisioned business starts unpaid", () => {
-  /** Evaluates access with a specific policy, no database involved. */
-  function evaluate(env, record) {
+describe("billing reporting stays inert", () => {
+  /**
+   * The billing model is kept for reporting an operator may still want, but it
+   * must never conclude that a customer should be locked out - that decision
+   * does not belong to it any more.
+   */
+  function evaluate(env = {}, record = null) {
     jest.resetModules();
     Object.assign(process.env, {
-      BILLING_ENFORCEMENT_ENABLED: "true",
-      BILLING_REQUIRE_ACTIVATION: "false",
+      BILLING_ENFORCEMENT_ENABLED: "false",
       ...env,
     });
     const { Billing } = require("../../business/models/billing");
     return Billing.evaluateAccess(record);
   }
 
-  afterEach(() => {
-    delete process.env.BILLING_REQUIRE_ACTIVATION;
-  });
-
-  it("restricts AI usage while it is awaiting its first payment", () => {
-    const access = evaluate({ BILLING_REQUIRE_ACTIVATION: "true" }, null);
-
-    expect(access.access).toBe("restricted");
-    expect(access.reason).toBe("awaiting_activation");
-    // The customer is told what to do, and told their data is untouched.
-    expect(access.message).toMatch(/payment/i);
-    expect(access.message).toMatch(/no data is affected/i);
-  });
-
-  it("is activated by a real subscription, not by an operator toggle", () => {
-    const active = evaluate(
-      { BILLING_REQUIRE_ACTIVATION: "true" },
-      { status: "active", cancel_at_period_end: false }
-    );
-    expect(active.access).toBe("ok");
-  });
-
-  it("leaves an existing unconfigured deployment alone when the flag is off", () => {
-    // This is the pre-existing promise: never punish a paying customer for the
-    // operator not having wired Stripe up. Provisioning opts new customers in;
-    // nothing opts an existing one in behind their back.
+  it("reports OK when no subscription exists at all", () => {
     const access = evaluate({}, null);
+    expect(access.access).toBe("ok");
+  });
+
+  it("still reports OK with no subscription even if enforcement is switched on", () => {
+    // A missing Stripe configuration must never be read as "lock them out".
+    const access = evaluate({ BILLING_ENFORCEMENT_ENABLED: "true" }, null);
     expect(access.access).toBe("ok");
     expect(access.reason).toBe("unconfigured");
   });
 
-  it("does not restrict when enforcement itself is off", () => {
-    const access = evaluate(
-      {
-        BILLING_ENFORCEMENT_ENABLED: "false",
-        BILLING_REQUIRE_ACTIVATION: "true",
-      },
-      null
+  it("has no activation flag left to gate a customer with", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const config = fs.readFileSync(
+      path.resolve(__dirname, "..", "..", "business", "config.js"),
+      "utf8"
     );
-    expect(access.access).toBe("ok");
+    expect(config).not.toContain("BILLING_REQUIRE_ACTIVATION");
   });
 });
 
