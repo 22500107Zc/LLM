@@ -20,7 +20,7 @@ configurable subscription fee (currently $3,888.88/month via
 | | |
 | --- | --- |
 | Backend | Node / Express (`server/`), commercial code isolated in `server/business/` |
-| Database | **SQLite via Prisma** (`server/prisma/schema.prisma`). Not PostgreSQL. |
+| Database | SQLite via Prisma locally; **Postgres on Vercel** — `scripts/prisma-provider.cjs` switches the datasource. |
 | Frontend | React + Vite (`frontend/`) |
 | Collector | Separate Node service for document parsing (`collector/`) |
 | Money | **Integer cents everywhere.** No floats, no Decimal library needed. |
@@ -76,7 +76,7 @@ Nothing in flight.
 
 ## Remaining / next actions
 
-1. **Deploy to Vercel** — blocked on a product decision, see `VERCEL.md`.
+1. **Add a Postgres `DATABASE_URL` to the Vercel project** and redeploy — see `VERCEL.md`.
 2. **Run the two credential-bound gates** (no code needed, see below).
 3. **Private repository migration** — `PRIVATE_REPO_MIGRATION.md`. Blocked on an
    account action; the script copies and verifies and deletes nothing.
@@ -201,22 +201,30 @@ ahead of the customer API router.
 
 ## Deploying to Vercel
 
-**Not yet deployed.** See `VERCEL.md` for the measured blockers and what a
-migration would take. The short version:
+**Deployed**, and waiting on one value. See `VERCEL.md`.
 
-- The production dependency tree is **669 MB**; a Vercel Node function is
-  limited to roughly 250 MB unzipped.
-- LanceDB, SQLite and the native embedding runtime all persist to local disk,
-  which a serverless runtime does not keep.
-- The document collector is a second long-running service.
+| | |
+| --- | --- |
+| Project | `business-ai-operations-platform` |
+| URL | https://business-ai-operations-platform-22500107zcs-projects.vercel.app |
+| Entry point | `api/index.js` |
+| Build | `scripts/vercel-build.cjs` |
+| Datasource switch | `scripts/prisma-provider.cjs` |
 
-Getting there means moving vector storage and embeddings to HTTP services and
-SQLite to Postgres, which removes capabilities from the self-hosted product.
-That is a product decision, not a packaging detail.
+The site serves, the serverless function boots and answers, and every API call
+returns a deliberate 500 saying `DATABASE_URL` is not set. Adding a Postgres
+connection string and redeploying is the whole remaining step; the build
+creates the schema itself.
+
+**What does not work on Vercel**, and is not pretended to: document upload and
+parsing (the collector is a second long-running service), native embeddings and
+LanceDB (both persist to a disk this runtime does not keep, and together exceed
+the function size limit), and agent websockets (Vercel supports them, through a
+different mechanism than the express-ws this product uses). Those paths answer
+501 with the reason rather than failing obscurely. Retrieval works only against
+a hosted vector database.
 
 ## Next action
 
-Decide the Vercel question in `VERCEL.md`: whether to move vector storage and
-embeddings to hosted HTTP services so the product fits a serverless runtime, or
-to host it where it keeps a filesystem. No Vercel project exists for this
-application yet.
+Add a Postgres `DATABASE_URL` to the Vercel project and redeploy. That is the
+only thing between the live deployment and a working founder console.

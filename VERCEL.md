@@ -1,30 +1,62 @@
 # Deploying this application to Vercel
 
-Status: **not deployed.** No Vercel project exists for this application yet,
-and getting the product onto a serverless runtime needs a product decision
-first. This file records what was measured, so the decision is made on
-evidence rather than on anyone's impression of what "should" work.
+**Deployed.** One Vercel project, building from this branch, serving the
+application. It needs one more value to be usable — a Postgres `DATABASE_URL`
+— and refuses to pretend otherwise until it has one.
 
-Everything below was measured in this repository on 2026-09-22, not recalled.
+| | |
+| --- | --- |
+| Project | `business-ai-operations-platform` (`prj_dfX3B70SA8MH0fn2dSzbszqsOlTp`) |
+| Team | `22500107zcs-projects` |
+| URL | https://business-ai-operations-platform-22500107zcs-projects.vercel.app |
+| Source | `22500107Zc/LLM`, branch `claude/commercial-b2b-ai-platform-0skp39` |
 
----
+## 1. What is verified live
 
-## 1. There is no Vercel project for this application
+```
+/                 200   "Business AI Operations Platform"
+/founder          200   (SPA route)
+/login            200   (SPA route)
+/assets/*.js      200
+/api/*            500   {"error":"misconfigured","message":"DATABASE_URL is not set…"}
+```
 
-The account `22500107zc's projects` (`team_IkbLxdR1NAqSwt0VUUTkcAjp`) holds 39
-projects. None of them is this application:
+The 500 is correct and deliberate. The serverless function boots, loads the
+whole application and answers — then refuses every API call because it has
+nowhere durable to keep customer accounts. A founder would otherwise create a
+customer, watch it succeed, and find it gone after the next cold start.
 
-- Filtering the project list by `repoUrl=https://github.com/22500107Zc/LLM`
-  returns **zero** projects.
-- There is no `.vercel/` directory in this repository.
-- There is no `vercel.json`.
-- Nothing in the repository references a Vercel project, org or deployment.
+Neither the served HTML nor the JavaScript bundle contains the founder
+password hash. Checked on the live deployment, not locally.
 
-So there is no existing project to redeploy into. Creating one is a decision
-for the repository owner, not something to do quietly — the account already has
-39 projects and does not need a fortieth created by mistake.
+## 1a. The one remaining step
 
----
+Add a Postgres connection string as `DATABASE_URL` in the project's
+environment variables and redeploy. Any Postgres works — Neon, Supabase and
+Vercel's own marketplace all have a free tier. The build creates the schema
+automatically (`prisma db push`); nothing else is needed.
+
+Then: open `/founder`, sign in, create a customer, and they can sign in at `/`.
+
+## 1b. Four real problems the deployment surfaced
+
+Each of these failed a build and was fixed, not worked around:
+
+1. **`npm install` refused the dependency tree.** `@langchain/community` wants
+   `@datastax/astra-db-ts ^1.0.0`; the tree pins `^0.1.3`. This repository
+   installs with yarn, which tolerates it. `--legacy-peer-deps` matches that.
+2. **A postinstall downloaded a binary the API never loads** (`@vscode/ripgrep`).
+   `--ignore-scripts`, with the Prisma client generated explicitly instead.
+3. **`vite: command not found`.** Vercel sets `NODE_ENV=production`, so npm
+   skipped devDependencies — and vite is one.
+4. **Rollup could not resolve `regenerator-runtime`**, imported directly by the
+   speech-to-text component. npm's tree did not hoist it; yarn's does. The
+   frontend now builds with `yarn --frozen-lockfile` against its committed
+   lockfile.
+
+There was also a bug in my own provider switcher: its first version matched the
+commented-out Postgres block in the schema and rewrote the documentation
+instead of the configuration. It looked like it worked and changed nothing.
 
 ## 2. What actually blocks a serverless deployment
 
