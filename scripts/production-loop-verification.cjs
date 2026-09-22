@@ -36,10 +36,19 @@ const { execFileSync } = require("child_process");
 const ROOT = path.resolve(__dirname, "..");
 const bcrypt = require(path.join(ROOT, "server", "node_modules", "bcryptjs"));
 
-const FOUNDER_PASSWORD =
-  "verify-founder-" + crypto.randomBytes(8).toString("hex");
-const ACME_PASSWORD = "Acme!Str0ng-Pass-1";
-const BETA_PASSWORD = "Beta!Str0ng-Pass-2";
+/**
+ * Every credential in this run is generated, never written down.
+ *
+ * A fixed password in a script is a password someone eventually reuses, and a
+ * run that leaves a known login behind in a database is a run that leaves a
+ * way in. These exist for the length of one process and nowhere else.
+ */
+const freshPassword = (label) =>
+  `${label}-${crypto.randomBytes(9).toString("base64url")}-A1!`;
+
+const FOUNDER_PASSWORD = freshPassword("verify-founder");
+const ACME_PASSWORD = freshPassword("acme");
+const BETA_PASSWORD = freshPassword("beta");
 
 let passed = 0;
 let failed = 0;
@@ -689,7 +698,7 @@ function modelProviderConfigured() {
 
   // ------------------------------------------------------------ credentials
   section("Founder-managed credentials");
-  const NEXT_PASSWORD = "A-Wh0lly-Different!9";
+  const NEXT_PASSWORD = freshPassword("rotated");
   const reset = await api.post(`/api/founder/customers/${acmeId}/password`, {
     password: NEXT_PASSWORD,
   });
