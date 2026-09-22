@@ -111,16 +111,20 @@ if (persistence.ok) {
 
 // ---------------------------------------------------------------- frontend --
 
-// --include=dev is not optional here: Vercel sets NODE_ENV=production, which
-// makes npm skip devDependencies, and vite - the thing that builds the
-// frontend - is one of them.
-run(
-  "npm",
-  ["install", "--include=dev", "--legacy-peer-deps", "--no-audit", "--no-fund"],
-  FRONTEND,
-  { NODE_ENV: "development" }
-);
-run("npm", ["run", "build"], FRONTEND);
+// yarn, not npm, and with the committed lockfile.
+//
+// npm produced a tree where `regenerator-runtime` - a transitive dependency
+// the speech-to-text component imports directly - was not hoisted to the top
+// level, and rollup could not resolve it. frontend/yarn.lock pins the exact
+// tree this frontend is known to build against.
+//
+// NODE_ENV is forced to development for the install only: Vercel sets it to
+// production, which makes a package manager skip devDependencies, and vite -
+// the thing that builds the frontend - is one of them.
+run("yarn", ["install", "--frozen-lockfile"], FRONTEND, {
+  NODE_ENV: "development",
+});
+run("yarn", ["build"], FRONTEND, { NODE_ENV: "production" });
 
 const dist = path.join(FRONTEND, "dist");
 const renamed = path.join(dist, "_index.html");
