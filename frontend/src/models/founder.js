@@ -162,6 +162,12 @@ const Founder = {
       : { success: false, error: payload?.error ?? GENERIC_ERROR };
   },
 
+  /** Is there a database and a model behind this deployment? Founder only. */
+  status: async function () {
+    const { ok, payload } = await request("/model-check");
+    return ok ? payload : null;
+  },
+
   audit: async function () {
     const { payload } = await request("/audit");
     return payload?.entries ?? [];

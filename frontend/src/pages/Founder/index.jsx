@@ -516,15 +516,70 @@ function Fact({ label, value }) {
 
 // ------------------------------------------------------------------ list ---
 
+/**
+ * What this deployment can and cannot do right now.
+ *
+ * Founder-only, and it exists so the answer to "is this ready to sell?" is on
+ * the screen rather than in a log. It shows nothing at all once both parts are
+ * working - a green panel on every visit is just noise.
+ */
+function Readiness({ status }) {
+  if (!status) return null;
+
+  const database = status.database === "postgres";
+  const model = status.ok === true;
+  if (database && model) return null;
+
+  const rows = [
+    {
+      ok: database,
+      label: "Customer accounts",
+      good: "Stored in Postgres.",
+      bad: "No database yet, so accounts cannot be created. Add a Postgres DATABASE_URL to this deployment.",
+    },
+    {
+      ok: model,
+      label: "AI assistant",
+      good: `Answering through ${status.provider}${status.model ? ` (${status.model})` : ""}.`,
+      bad: "No model provider yet, so customers cannot chat. Add a provider key to this deployment.",
+    },
+  ];
+
+  return (
+    <div className="mb-6 rounded-lg border border-yellow-600/40 bg-yellow-500/5 p-4">
+      <p className="mb-3 text-sm font-medium text-theme-text-primary">
+        This deployment is not ready to sell yet
+      </p>
+      <ul className="space-y-2">
+        {rows.map((row) => (
+          <li key={row.label} className="flex gap-3 text-sm">
+            <span aria-hidden="true">{row.ok ? "✓" : "•"}</span>
+            <span>
+              <span className="font-medium text-theme-text-primary">
+                {row.label}:{" "}
+              </span>
+              <span className="text-theme-text-secondary">
+                {row.ok ? row.good : row.bad}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Console({ onSignOut }) {
   const [customers, setCustomers] = useState([]);
   const [counts, setCounts] = useState({});
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [status, setStatus] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    Founder.status().then(setStatus);
     const result = await Founder.customers();
     setCustomers(result.customers ?? []);
     setCounts(result.counts ?? {});
@@ -563,6 +618,8 @@ function Console({ onSignOut }) {
       }
     >
       {error && <ErrorBanner message={error} />}
+
+      <Readiness status={status} />
 
       <Card
         title={`Accounts (${counts.active ?? 0} active, ${
