@@ -310,6 +310,38 @@ parsing (the collector is a second long-running service) and agent automations
 than an engineering error. Everything else — accounts, access control,
 workspaces, conversation, retrieval over pgvector — runs there.
 
+## What is verified on the live production URL
+
+Not against Postgres locally - against
+`https://business-ai-operations-platform-22500107zcs-projects.vercel.app`.
+
+- The application is served: `/`, `/founder`, `/login` all 200.
+- **The founder signs in.** Login, session and logout do not touch the
+  database - the password is a bcrypt hash in an environment variable, the
+  session is an opaque token held in memory, and the audit write that follows
+  already fails soft. `api/index.js` lets exactly those paths, plus
+  `/api/founder/model-check`, through the persistence gate. Everything that
+  reads or writes customer data still refuses, so nothing can be created and
+  then quietly lost.
+- The browser bundle contains no secret.
+- Runtime logs show only the deliberate 503s. No unhandled exception.
+
+`scripts/production-acceptance.cjs` runs the whole commercial loop against
+that URL - founder login, customer creation, customer sign-in, a real AI turn,
+disable, restore, password and email rotation, isolation between two
+customers, and survival across a cold start - creating only throwaway accounts
+and removing them afterwards, including after a failure. It reports BLOCKED
+rather than failed for anything the deployment cannot do yet.
+
+## The model provider
+
+`api/index.js` points the existing `generic-openai` provider at Vercel's AI
+Gateway using the deployment's own OIDC identity, so no third-party account or
+separate key is needed. OIDC is enabled on the project. **It does not work
+yet**: `VERCEL_OIDC_TOKEN` is not present in the function's runtime
+environment on this plan, which the founder's model check reports. Setting any
+provider key overrides the whole mechanism and takes effect immediately.
+
 ## Next action
 
 In the Vercel project's environment variables, set four values and redeploy:
@@ -318,6 +350,15 @@ In the Vercel project's environment variables, set four values and redeploy:
 | --- | --- |
 | `DATABASE_URL` | A Postgres connection string. The build creates the schema itself. |
 | `OPEN_AI_KEY` | Or another provider's key, with `LLM_PROVIDER` set to match. |
-| `FOUNDER_PASSWORD_HASH` | **Rotate it.** The old one was served in the bundle. Generate a new one with `node scripts/founder-password.cjs`. |
 
-`JWT_SECRET`, `SIG_KEY` and `SIG_SALT` were already rotated and need nothing.
+`FOUNDER_PASSWORD_HASH`, `JWT_SECRET`, `SIG_KEY` and `SIG_SALT` have all been
+rotated already and need nothing. The founder password was replaced after the
+old hash was served in the bundle; it was handed over once, in chat, and
+exists here only as a hash.
+
+Then run, with the founder password in the environment and never on the
+command line:
+
+```
+FOUNDER_PASSWORD=... node scripts/production-acceptance.cjs
+```
