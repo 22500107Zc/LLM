@@ -110,12 +110,10 @@ function aiConnectionRoutes(router) {
           error.message
         );
         // Their own service, their own credential - they need the real reason.
-        return response
-          .status(200)
-          .json({
-            ok: false,
-            reason: String(error.message ?? error).slice(0, 300),
-          });
+        return response.status(200).json({
+          ok: false,
+          reason: String(error.message ?? error).slice(0, 300),
+        });
       }
     })
   );
