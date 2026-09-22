@@ -55,6 +55,22 @@ function check(name, condition, detail = "") {
   }
 }
 
+let blockedCount = 0;
+const blockedItems = [];
+
+/**
+ * A gate that needs something this machine does not have.
+ *
+ * Deliberately not a PASS and deliberately not a FAIL. Reporting a missing
+ * model provider as a pass would be a lie about the product; reporting it as a
+ * failure would hide the real failures underneath it.
+ */
+function blocked(name, why) {
+  blockedCount += 1;
+  blockedItems.push(`${name} - ${why}`);
+  console.log(`  \x1b[33mBLOCKED\x1b[0m  ${name}  (${why})`);
+}
+
 function section(title) {
   console.log(`\n\x1b[1m${title}\x1b[0m`);
 }
@@ -150,6 +166,134 @@ const useProduct = (token, urlPath = "/api/workspaces") =>
   call("GET", urlPath, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
+
+/**
+ * One real AI turn, exactly as the product's own chat window makes it.
+ *
+ * `/workspace/:slug/stream-chat` answers with server-sent events, so this
+ * reads the stream to completion and returns the chunks. Nothing is stubbed:
+ * if there is no model provider behind it, the failure chunk this returns is
+ * the failure a customer would see.
+ */
+async function chat(token, slug, message) {
+  const response = await fetch(`${base}/api/workspace/${slug}/stream-chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ message, attachments: [] }),
+  });
+
+  const body = await response.text();
+  const chunks = [];
+  for (const line of body.split("\n")) {
+    if (!line.startsWith("data:")) continue;
+    try {
+      chunks.push(JSON.parse(line.slice(5).trim()));
+    } catch {
+      /* a partial frame is not an answer; ignore it */
+    }
+  }
+  return {
+    status: response.status,
+    chunks,
+    text: chunks.map((chunk) => chunk.textResponse ?? "").join(""),
+    error: chunks.map((chunk) => chunk.error).find(Boolean) ?? null,
+  };
+}
+
+/**
+ * A real OpenAI-compatible endpoint, on localhost.
+ *
+ * READ THIS BEFORE TRUSTING THE SECTION THAT USES IT.
+ *
+ * This is NOT a stubbed AI response inside the product. The product is not
+ * modified, mocked or short-circuited in any way: it selects a provider,
+ * builds an OpenAI client, opens a real HTTP connection, sends a real
+ * `/chat/completions` request carrying the customer's message and the
+ * workspace's system prompt, and parses a real server-sent-event stream back.
+ * Every line of the product's AI path runs.
+ *
+ * What this DOES prove: the AI pipeline works end to end for an authenticated
+ * customer - routing, provider selection, prompt assembly, streaming, history.
+ *
+ * What this does NOT prove: that a model gives good answers. That needs a paid
+ * provider key and is reported as blocked, not passed.
+ */
+async function openAiCompatibleEndpoint(answerText) {
+  const received = [];
+  const endpoint = http.createServer((request, response) => {
+    let body = "";
+    request.on("data", (part) => (body += part));
+    request.on("end", () => {
+      received.push({ url: request.url, body: safeParse(body) });
+
+      if (!request.url.includes("/chat/completions")) {
+        response.writeHead(404).end("{}");
+        return;
+      }
+
+      response.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      const frame = (delta, finish = null) =>
+        `data: ${JSON.stringify({
+          id: "verification",
+          object: "chat.completion.chunk",
+          created: Math.floor(Date.now() / 1000),
+          model: "verification-model",
+          choices: [{ index: 0, delta, finish_reason: finish }],
+        })}\n\n`;
+
+      response.write(frame({ role: "assistant", content: "" }));
+      for (const word of answerText.split(" "))
+        response.write(frame({ content: `${word} ` }));
+      response.write(frame({}, "stop"));
+      response.write("data: [DONE]\n\n");
+      response.end();
+    });
+  });
+  await new Promise((resolve) => endpoint.listen(0, "127.0.0.1", resolve));
+  return {
+    received,
+    url: `http://127.0.0.1:${endpoint.address().port}/v1`,
+    async close() {
+      endpoint.closeAllConnections?.();
+      await new Promise((resolve) => endpoint.close(resolve));
+    },
+  };
+}
+
+function safeParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a real model provider is reachable in this process. */
+function modelProviderConfigured() {
+  const keys = [
+    "OPEN_AI_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GENERIC_OPEN_AI_BASE_PATH",
+    "OLLAMA_BASE_PATH",
+    "LMSTUDIO_BASE_PATH",
+    "AZURE_OPENAI_KEY",
+    "TOGETHER_AI_API_KEY",
+    "GROQ_API_KEY",
+    "OPENROUTER_API_KEY",
+    "MISTRAL_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "XAI_LLM_API_KEY",
+  ];
+  return keys.some((key) => String(process.env[key] ?? "").trim().length > 0);
+}
 
 // ------------------------------------------------------------------ main ---
 
@@ -251,6 +395,7 @@ const useProduct = (token, urlPath = "/api/workspaces") =>
   });
   check("customer created", created.status === 201, `got ${created.status}`);
   const acmeId = created.payload?.customer?.id;
+  const acmeUserId = created.payload?.customer?.userId;
   check("login email is what the founder entered", created.payload?.customer?.loginEmail === "dana@acme.test");
   check("starts ACTIVE", created.payload?.customer?.access === "active");
 
@@ -290,6 +435,156 @@ const useProduct = (token, urlPath = "/api/workspaces") =>
     usingProduct.status === 200,
     `got ${usingProduct.status}`
   );
+
+  // A customer is a `default` user, and `/api/workspace/new` is admin/manager
+  // only - deliberately, because an admin would see every other customer's
+  // workspaces. So a customer who arrived with nothing could not make
+  // themselves anything to work in. Creating the account provisions their
+  // first workspace; this is the check that they land somewhere usable.
+  const firstLook = usingProduct.payload?.workspaces ?? [];
+  check(
+    "customer lands in a usable environment, not an empty product",
+    firstLook.length > 0,
+    `saw ${firstLook.length} workspaces`
+  );
+  check(
+    "their workspace is named after their business",
+    firstLook.some((workspace) => workspace.name === "Acme Corporation"),
+    firstLook.map((workspace) => workspace.name).join(", ") || "none"
+  );
+
+  // ------------------------------------------------------------ AI workflow
+  //
+  // The product is sold as an AI assistant, so this is the check that decides
+  // whether it is sellable. It drives the real chat endpoint over a real
+  // socket as the authenticated customer. There is no stub behind it: with a
+  // provider key it must come back with an actual answer, and without one it
+  // must fail in a way a customer can read.
+  section("AI workflow");
+  const workspaceSlug = firstLook[0]?.slug;
+  const answer = workspaceSlug
+    ? await chat(token, workspaceSlug, "In one sentence, what is a purchase order?")
+    : null;
+
+  if (!workspaceSlug) {
+    check("customer has a workspace to chat in", false, "no workspace");
+  } else if (modelProviderConfigured()) {
+    check("the chat endpoint accepts the customer's message", answer.status === 200);
+    check("the assistant answered", !answer.error, answer.error ?? "");
+    check(
+      "the answer is real text, not an empty stream",
+      answer.text.trim().length > 20,
+      `${answer.text.trim().length} characters`
+    );
+    check(
+      "the turn was written to the customer's chat history",
+      (await prisma.workspace_chats.count({
+        where: { workspaceId: firstLook[0].id },
+      })) > 0
+    );
+  } else {
+    blocked(
+      "an authenticated customer completes an AI turn",
+      "no model provider key in this environment"
+    );
+    // What the product does with no provider is still ours to get right.
+    check(
+      "the chat endpoint is reachable by an ordinary customer",
+      answer.status === 200,
+      `got ${answer.status}`
+    );
+    check(
+      "a provider failure is reported to the customer, not swallowed",
+      Boolean(answer.error)
+    );
+    check(
+      "the customer is told this in plain language",
+      /not available right now|please try again|contact support/i.test(
+        answer.error ?? ""
+      ),
+      answer.error ?? "no error text"
+    );
+    check(
+      "no infrastructure detail leaks into what the customer sees",
+      !/api key|apikey|module|lancedb|prisma|postgres|vercel|stack|node_modules|\.js:/i.test(
+        answer.error ?? ""
+      ),
+      answer.error ?? ""
+    );
+  }
+
+  // ------------------------------------- AI pipeline, against a real endpoint
+  //
+  // The section above cannot finish without a paid provider. This one proves
+  // everything up to the model itself: the product makes a genuine HTTP call
+  // to an OpenAI-compatible endpoint and streams the reply back to the
+  // customer. Read openAiCompatibleEndpoint's comment for what that is and is
+  // not evidence of.
+  section("AI pipeline, against a real OpenAI-compatible endpoint");
+  const ANSWER =
+    "A purchase order is a buyer's written commitment to buy specified goods at an agreed price.";
+  const endpoint = await openAiCompatibleEndpoint(ANSWER);
+  const restore = { ...process.env };
+  Object.assign(process.env, {
+    LLM_PROVIDER: "generic-openai",
+    GENERIC_OPEN_AI_BASE_PATH: endpoint.url,
+    GENERIC_OPEN_AI_MODEL_PREF: "verification-model",
+    GENERIC_OPEN_AI_API_KEY: "verification-only-not-a-real-key",
+    GENERIC_OPEN_AI_MODEL_TOKEN_LIMIT: "8192",
+  });
+
+  if (!workspaceSlug) {
+    check("customer has a workspace to chat in", false, "no workspace");
+  } else {
+    const piped = await chat(
+      token,
+      workspaceSlug,
+      "In one sentence, what is a purchase order?"
+    );
+    check("the customer's chat request is accepted", piped.status === 200);
+    check("nothing failed in the AI path", !piped.error, piped.error ?? "");
+    check(
+      "the product reached the provider over real HTTP",
+      endpoint.received.some((call) => call.url.includes("/chat/completions"))
+    );
+
+    const sent = endpoint.received.find((call) =>
+      call.url.includes("/chat/completions")
+    )?.body;
+    check(
+      "the customer's own words were sent to the model",
+      JSON.stringify(sent?.messages ?? []).includes("what is a purchase order")
+    );
+    check(
+      "the workspace's system prompt went with it",
+      (sent?.messages ?? []).some((message) => message.role === "system")
+    );
+    check(
+      "the answer streamed back to the customer intact",
+      piped.text.includes("written commitment to buy"),
+      piped.text.slice(0, 80)
+    );
+
+    const stored = await prisma.workspace_chats.findMany({
+      where: { workspaceId: firstLook[0].id },
+    });
+    check("the turn was written to the customer's chat history", stored.length > 0);
+    check(
+      "the stored turn belongs to that customer and no one else",
+      stored.every((row) => row.user_id === acmeUserId)
+    );
+  }
+
+  for (const key of [
+    "LLM_PROVIDER",
+    "GENERIC_OPEN_AI_BASE_PATH",
+    "GENERIC_OPEN_AI_MODEL_PREF",
+    "GENERIC_OPEN_AI_API_KEY",
+    "GENERIC_OPEN_AI_MODEL_TOKEN_LIMIT",
+  ])
+    if (restore[key] === undefined) delete process.env[key];
+    else process.env[key] = restore[key];
+  await endpoint.close();
 
   // -------------------------------------------------------- disable/restore
   section("Founder-controlled access");
@@ -489,8 +784,12 @@ const useProduct = (token, urlPath = "/api/workspaces") =>
   await prisma2.$disconnect();
 
   console.log(
-    `\n${"=".repeat(60)}\nCOMMERCIAL LOOP: ${passed} passed, ${failed} failed\n${"=".repeat(60)}`
+    `\n${"=".repeat(60)}\nCOMMERCIAL LOOP: ${passed} passed, ${failed} failed, ${blockedCount} blocked\n${"=".repeat(60)}`
   );
+  if (blockedItems.length) {
+    console.log("\nBlocked (needs something this machine does not have):");
+    for (const item of blockedItems) console.log(`  - ${item}`);
+  }
   if (failures.length) {
     console.log("\nFailures:");
     for (const name of failures) console.log(`  - ${name}`);

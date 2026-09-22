@@ -1,5 +1,6 @@
 const prisma = require("../../utils/prisma");
 const { User } = require("../../models/user");
+const { Workspace } = require("../../models/workspace");
 
 /**
  * Customers the founder created and authorized.
@@ -145,6 +146,26 @@ const Customer = {
         },
         include: { user: true },
       });
+
+      // Give them somewhere to work on their first login.
+      //
+      // A customer is `default` role, which cannot create a workspace - by
+      // design, since workspace membership is what keeps one customer out of
+      // another's data. Without this they would sign in to an empty product
+      // and have no way to fix it themselves. `Workspace.new` attaches the
+      // creator as a member, so this workspace is theirs and only theirs.
+      //
+      // A failure here is not fatal: the account is real and they can sign in.
+      // The founder can add a workspace afterwards.
+      try {
+        await Workspace.new(String(businessName).trim(), user.id);
+      } catch (error) {
+        console.error(
+          `[Customer] could not create the initial workspace for ${loginEmail}:`,
+          error.message
+        );
+      }
+
       return { customer: present(record), error: null };
     } catch (error) {
       // The user row would otherwise be orphaned: a login with no customer

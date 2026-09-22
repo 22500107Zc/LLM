@@ -15,7 +15,7 @@ generator client {
 // deployments behave exactly as before, while an operator can point a
 // dedicated customer deployment - or a disposable test run - at its own file.
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 

@@ -15,6 +15,10 @@ const {
   sourceIdentifier,
 } = require("./index");
 
+const {
+  customerFacingMessage,
+} = require("../../business/services/customerFacing");
+
 const VALID_CHAT_MODE = ["automatic", "chat", "query"];
 
 async function streamChatWithWorkspace(
@@ -381,7 +385,7 @@ async function resolveLLMConnector({
       connector: null,
       routingMetadata: null,
       prefetchedContext: null,
-      error: `Model router error: ${routerError.message}`,
+      error: customerFacingMessage(routerError, "model router"),
     };
   }
 }

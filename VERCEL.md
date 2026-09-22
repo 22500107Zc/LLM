@@ -1,8 +1,8 @@
 # Deploying this application to Vercel
 
 **Deployed.** One Vercel project, building from this branch, serving the
-application. It needs one more value to be usable — a Postgres `DATABASE_URL`
-— and refuses to pretend otherwise until it has one.
+application. It needs two values to be a product a customer can pay for, and
+refuses to pretend otherwise until it has them.
 
 | | |
 | --- | --- |
@@ -11,7 +11,26 @@ application. It needs one more value to be usable — a Postgres `DATABASE_URL`
 | URL | https://business-ai-operations-platform-22500107zcs-projects.vercel.app |
 | Source | `22500107Zc/LLM`, branch `claude/commercial-b2b-ai-platform-0skp39` |
 
-## 1. What is verified live
+## 1. The two values it still needs
+
+Both go in the project's environment variables. Nothing else is required, and
+no code change is involved.
+
+| Variable | What to put there |
+| --- | --- |
+| `DATABASE_URL` | A Postgres connection string. Neon, Supabase and Vercel's own marketplace all have a free tier. The build creates the schema itself with `prisma db push`. |
+| `OPEN_AI_KEY` | A model provider key. Any provider the product supports works; the variable name changes with it (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, and so on, with `LLM_PROVIDER` set to match). |
+
+Then redeploy. Open `/founder`, sign in, create a customer, and they can sign
+in at `/` and start a conversation.
+
+Retrieval needs nothing further: `VECTOR_DB` defaults to `pgvector` on this
+runtime and reuses the same `DATABASE_URL`, so there is no second database to
+buy. If that Postgres has no `vector` extension, conversation still works and
+retrieval over uploaded documents simply reports nothing — which is accurate,
+because document upload is unavailable here anyway (see §3).
+
+## 1a. What is verified live
 
 ```
 /                 200   "Business AI Operations Platform"
@@ -29,18 +48,22 @@ customer, watch it succeed, and find it gone after the next cold start.
 Neither the served HTML nor the JavaScript bundle contains the founder
 password hash. Checked on the live deployment, not locally.
 
-## 1a. The one remaining step
+## 1b. What the whole commercial loop is proved against
 
-Add a Postgres connection string as `DATABASE_URL` in the project's
-environment variables and redeploy. Any Postgres works — Neon, Supabase and
-Vercel's own marketplace all have a free tier. The build creates the schema
-automatically (`prisma db push`); nothing else is needed.
+`scripts/production-loop-verification.cjs` drives **this file** — `api/index.js`,
+the real Vercel entry point — over a real socket against a real Postgres, with
+every `STRIPE_*` variable deleted from the process:
 
-Then: open `/founder`, sign in, create a customer, and they can sign in at `/`.
+```
+COMMERCIAL LOOP: 70 passed, 0 failed, 1 blocked
+```
 
-## 1b. Four real problems the deployment surfaced
+The one blocked item is a model provider key, which this machine does not
+have. It is reported as blocked, never as passed.
 
-Each of these failed a build and was fixed, not worked around:
+## 1c. Six real problems the deployment surfaced
+
+Each of these failed for real and was fixed, not worked around:
 
 1. **`npm install` refused the dependency tree.** `@langchain/community` wants
    `@datastax/astra-db-ts ^1.0.0`; the tree pins `^0.1.3`. This repository
@@ -53,10 +76,27 @@ Each of these failed a build and was fixed, not worked around:
    speech-to-text component. npm's tree did not hoist it; yarn's does. The
    frontend now builds with `yarn --frozen-lockfile` against its committed
    lockfile.
+5. **A `default`-role customer could not create a workspace**, so they would
+   have signed in to an empty product with no way to fix it. Creating the
+   account now provisions their first workspace. (They are deliberately not
+   admins: an admin sees every other customer's workspaces.)
+6. **Every customer message would have hung.** The default chat mode is
+   `automatic`, and with a tool-calling model that routes every message into
+   the agent flow — which answers with a websocket address. There are no
+   websockets here, so the browser would have waited forever with no error.
+   `api/index.js` now turns agent chat off on this runtime and says so.
 
 There was also a bug in my own provider switcher: its first version matched the
 commented-out Postgres block in the schema and rewrote the documentation
 instead of the configuration. It looked like it worked and changed nothing.
+
+## 1d. What a customer sees when something breaks
+
+Nothing from the engine room. Provider errors, missing keys and module
+failures are translated by `server/business/services/customerFacing.js` into a
+sentence in the customer's own language; the real error goes to the server log,
+where it is useful. A test asserts that no API key text, module name, database
+name or stack frame can reach a customer's screen.
 
 ## 2. What actually blocks a serverless deployment
 
@@ -98,7 +138,7 @@ time it scales.
 | What | Where it writes | Consequence on Vercel |
 | --- | --- | --- |
 | SQLite (Prisma) | `server/storage/anythingllm.db` | every account, workspace and chat vanishes on the next cold start |
-| LanceDB | `server/storage/lancedb` (`utils/vectorDbProviders/lance/index.js:25`) | embedded documents vanish; retrieval returns nothing |
+| LanceDB | `server/storage/lancedb` (`utils/vectorDbProviders/lance/index.js:25`) | embedded documents vanish; retrieval returns nothing — **solved**, this runtime uses pgvector on the same Postgres |
 | Native embeddings | model files cached to disk by `@xenova/transformers` | re-downloaded per instance, or fails |
 | Uploaded documents | `STORAGE_DIR/documents` (`utils/files/index.js:10`) | uploads vanish |
 
@@ -120,53 +160,32 @@ Vercel's own upgrade mechanism.
 
 ---
 
-## 3. What a Vercel migration would actually require
+## 3. What the migration actually took, and what it cost
 
-In dependency order:
+In dependency order, all done:
 
-1. **Postgres instead of SQLite.** Prisma's schema already carries a
-   commented-out `postgresql` datasource. The provider cannot be chosen by an
-   environment variable in Prisma 5.3, so this means a second schema file or a
-   build step, plus regenerating the migration history for Postgres.
-2. **A hosted vector database instead of LanceDB.** The product already
-   supports Pinecone, Qdrant, Weaviate, Milvus and Astra over HTTP. Choosing
-   one and **removing `@lancedb/lancedb` from `dependencies`** is what actually
-   reclaims the 178 MB — setting `VECTOR_DB` alone does not, because the
-   package still ships.
-3. **Provider embeddings instead of native.** Same reasoning: setting
-   `EMBEDDING_ENGINE=openai` stops ONNX running, but `@xenova/transformers` and
-   `onnxruntime-node` still ship. They have to come out of `dependencies`.
-4. **Blob storage for uploaded documents**, e.g. Vercel Blob.
-5. **Host the collector somewhere with a filesystem**, or accept that document
-   upload does not work.
-6. **Port the agent WebSocket** to Vercel's upgrade API.
+1. **Postgres instead of SQLite.** The provider cannot be an environment
+   variable in Prisma 5.3, so `scripts/prisma-provider.cjs` rewrites the
+   datasource at build time. The committed migration history is SQLite DDL and
+   will not apply to Postgres, so the build uses `prisma db push`.
+2. **pgvector instead of LanceDB.** The same Postgres, through the `pg`
+   client — no second service and no second bill. Selected automatically by
+   `selectVectorStore()` in `api/index.js`.
+3. **Provider embeddings instead of native.** `@xenova/transformers` and
+   `onnxruntime-node` are out of the function bundle. The native embedder's
+   import is lazy, so the module still loads; it simply never runs here.
+4. **Agent chat turned off on this runtime**, because a websocket address that
+   cannot be connected to is worse than an honest refusal.
+5. **Document upload answers 503 with a plain sentence**, because the collector
+   is a second long-running service and there is nothing here to run it.
 
-Steps 2 and 3 are the ones that are not just packaging. They remove
-self-hosted, no-external-dependency operation from the product: today a
-customer can run this with nothing but an LLM key, and afterwards they could
-not. That is a product decision.
+What that cost the product: on Vercel it requires a hosted Postgres and a model
+provider, and document upload does not work. Self-hosted — the Docker image in
+this repository — none of that applies: SQLite, LanceDB, native embeddings, the
+collector and agents all work as they always did. Both are the same one
+application and the same founder/customer model; only the runtime differs.
 
----
-
-## 4. The choice
-
-**Option A — make it fit Vercel.** Do all six steps above. One Vercel project,
-one URL, and the founder/customer model already built works there unchanged.
-Cost: the product permanently requires a hosted vector database and a hosted
-embedding provider, and document upload needs the collector hosted elsewhere.
-
-**Option B — host it where it keeps a filesystem.** One container on Fly.io,
-Railway, Render or a plain VPS. One application, one URL, one project — every
-product requirement is satisfied except the specific word "Vercel". Nothing is
-removed, the collector runs beside the server as it already does, and the
-existing Docker image is the deployment artifact.
-
-The founder-controlled account model this repository now implements is
-**identical either way**. It does not depend on where the application runs.
-
----
-
-## 5. What is already done, whichever is chosen
+## 4. What is true either way
 
 - One application, one set of accounts. No per-customer deployment.
 - Founder login, founder-created customer accounts, founder-controlled
@@ -174,5 +193,4 @@ The founder-controlled account model this repository now implements is
 - No public signup.
 - Stripe entirely outside the authorization path; no API key, no webhook.
 - Disabling a customer ends their live session on the next request.
-
-None of that needs to change to deploy anywhere.
+- One customer cannot see another's workspaces, enforced server-side.

@@ -16,6 +16,9 @@ const { writeResponseChunk } = require("../utils/helpers/chat/responses");
 const { WorkspaceThread } = require("../models/workspaceThread");
 const { User } = require("../models/user");
 const { getModelTag } = require("./utils");
+const {
+  customerFacingMessage,
+} = require("../business/services/customerFacing");
 
 function chatEndpoints(app) {
   if (!app) return;
@@ -95,7 +98,7 @@ function chatEndpoints(app) {
           textResponse: null,
           sources: [],
           close: true,
-          error: e.message,
+          error: customerFacingMessage(e, request.path),
         });
         response.end();
       }
@@ -201,7 +204,7 @@ function chatEndpoints(app) {
           textResponse: null,
           sources: [],
           close: true,
-          error: e.message,
+          error: customerFacingMessage(e, request.path),
         });
         response.end();
       }

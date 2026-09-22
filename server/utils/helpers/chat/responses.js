@@ -1,6 +1,9 @@
 const { v4: uuidv4 } = require("uuid");
 const moment = require("moment");
 const { isAbortError } = require("../abortSignals");
+const {
+  customerFacingMessage,
+} = require("../../../business/services/customerFacing");
 
 /**
  * Extract reasoning content from a message or delta, checking all known field names.
@@ -186,7 +189,7 @@ function handleDefaultStreamResponseV2(response, stream, responseProps) {
         textResponse: null,
         sources: [],
         close: true,
-        error: e.message,
+        error: customerFacingMessage(e, "streaming response"),
       });
       stream?.endMeasurement(usage);
       resolve(fullText); // Return what we currently have - if anything.

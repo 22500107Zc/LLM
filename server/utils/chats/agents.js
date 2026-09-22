@@ -44,6 +44,32 @@ async function grepAgents({
   thread = null,
   attachments = [],
 }) {
+  // A runtime with no websockets cannot run an agent.
+  //
+  // This matters more than it looks. The default chat mode is "automatic",
+  // and in automatic mode a provider that supports tool calling sends EVERY
+  // customer message down the agent path - which answers with a websocket
+  // address for the browser to connect to. Where that socket cannot exist,
+  // the customer types a question and the chat simply hangs.
+  //
+  // So: say something true and keep going as an ordinary question, rather
+  // than handing out an address that will never answer.
+  if (process.env.DISABLE_AGENT_CHAT === "true") {
+    if (WorkspaceAgentInvocation.parseAgents(message).length === 0)
+      return false;
+    writeResponseChunk(response, {
+      id: uuid,
+      type: "statusResponse",
+      textResponse:
+        "Automations are not enabled on your plan yet - answering this as a normal question.",
+      sources: [],
+      close: false,
+      animate: false,
+      error: null,
+    });
+    return false;
+  }
+
   let nativeToolingEnabled = false;
 
   // If the workspace is in automatic mode, check if the workspace supports native tooling

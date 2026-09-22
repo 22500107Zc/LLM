@@ -69,6 +69,23 @@ or websites. See "Founder control plane" below.
   reachability. Committed-secret scanner reports locations only, never values.
 - **Founder control plane** — `server/business/founder/`, `/founder` in the
   frontend, documented in `DEPLOYMENT.md` §2a. See below.
+- **The whole commercial loop, proved on Postgres through the real Vercel
+  entry point** — `scripts/production-loop-verification.cjs`. 70 checks, 0
+  failures, 1 honestly blocked. See "Proof, not assertion" below.
+- **A customer lands somewhere usable** — creating an account provisions that
+  business its first workspace. Customers are `default` role and cannot create
+  one themselves, which is deliberate: an admin would see everyone's data.
+- **Nothing from the engine room reaches a customer** —
+  `server/business/services/customerFacing.js` translates provider errors,
+  missing keys and module failures into plain sentences; the real error goes to
+  the log. Tested against API keys, module names, Prisma errors and stack text.
+- **Agent chat is off where websockets cannot exist.** The default chat mode is
+  `automatic`, which with a tool-calling model routes every message into the
+  agent flow and answers with a websocket address. On Vercel that address goes
+  nowhere and the chat would hang silently. `api/index.js` disables it there and
+  the product says so; self-hosted, agents work unchanged.
+- **Retrieval with no second service** — `VECTOR_DB` defaults to `pgvector` on
+  the serverless runtime, reusing the same `DATABASE_URL`.
 
 ## Currently implementing
 
@@ -76,18 +93,53 @@ Nothing in flight.
 
 ## Remaining / next actions
 
-1. **Add a Postgres `DATABASE_URL` to the Vercel project** and redeploy — see `VERCEL.md`.
+1. **Add `DATABASE_URL` and a model provider key to the Vercel project** and
+   redeploy — see `VERCEL.md` §1. Both are account actions; there is no code
+   left to write for either.
 2. **Run the two credential-bound gates** (no code needed, see below).
 3. **Private repository migration** — `PRIVATE_REPO_MIGRATION.md`. Blocked on an
    account action; the script copies and verifies and deletes nothing.
+
+## Proof, not assertion
+
+`scripts/production-loop-verification.cjs` is the one to read. It requires a
+Postgres `DATABASE_URL`, refuses to run against SQLite, deletes every `STRIPE_*`
+variable from the process, and drives `api/index.js` — the actual Vercel entry
+point, not a test harness — over a real socket.
+
+```
+DATABASE_URL=postgresql://… node scripts/production-loop-verification.cjs
+COMMERCIAL LOOP: 70 passed, 0 failed, 1 blocked
+```
+
+Among the 70: a founder creates a customer; the customer signs in and lands in
+their own workspace; the founder disables them and their **already issued**
+session dies on the very next request; passwords are never stored or returned
+in recoverable form; one customer cannot read another's workspace even by
+calling the API directly; the handler is restarted with an empty module cache
+and every account is still there; a customer's token is worthless on the
+founder API.
+
+Two AI sections, deliberately separate:
+
+- **AI workflow** — needs a paid provider key, so it is reported **BLOCKED**.
+  It is never reported as passing. What is checked without a key is that the
+  failure reaches the customer as a readable sentence with no infrastructure
+  detail in it.
+- **AI pipeline, against a real OpenAI-compatible endpoint** — the product is
+  not mocked, stubbed or short-circuited: it selects a provider, opens a real
+  HTTP connection, sends the customer's message and the workspace system
+  prompt, and parses a real SSE stream back. This proves the pipeline works end
+  to end. It does **not** prove answer quality, and does not claim to.
 
 ---
 
 ## Test status
 
 ```
-npx jest                       1525 passed, 3 failed (ffmpeg), 1528 total
-npx jest __tests__/business     433 passed, 433 total   (run from server/)
+npx jest                       1531 passed, 3 failed (ffmpeg), 1534 total
+npx jest __tests__/business     439 passed, 439 total   (run from server/)
+node scripts/production-loop-verification.cjs   70 passed, 0 failed, 1 blocked
 ./scripts/final-verification.sh 19 passed, 1 failed, 3 blocked
 ./scripts/operator-backup-test.sh   18 passed, 0 failed
 ```
@@ -201,7 +253,7 @@ ahead of the customer API router.
 
 ## Deploying to Vercel
 
-**Deployed**, and waiting on one value. See `VERCEL.md`.
+**Deployed**, and waiting on two values. See `VERCEL.md`.
 
 | | |
 | --- | --- |
@@ -213,18 +265,16 @@ ahead of the customer API router.
 
 The site serves, the serverless function boots and answers, and every API call
 returns a deliberate 500 saying `DATABASE_URL` is not set. Adding a Postgres
-connection string and redeploying is the whole remaining step; the build
-creates the schema itself.
+connection string and a model provider key and redeploying is the whole
+remaining step; the build creates the schema itself.
 
 **What does not work on Vercel**, and is not pretended to: document upload and
-parsing (the collector is a second long-running service), native embeddings and
-LanceDB (both persist to a disk this runtime does not keep, and together exceed
-the function size limit), and agent websockets (Vercel supports them, through a
-different mechanism than the express-ws this product uses). Those paths answer
-501 with the reason rather than failing obscurely. Retrieval works only against
-a hosted vector database.
+parsing (the collector is a second long-running service) and agent automations
+(no websockets). Those answer 503 with a plain sentence about the plan rather
+than an engineering error. Everything else — accounts, access control,
+workspaces, conversation, retrieval over pgvector — runs there.
 
 ## Next action
 
-Add a Postgres `DATABASE_URL` to the Vercel project and redeploy. That is the
-only thing between the live deployment and a working founder console.
+Add `DATABASE_URL` and a model provider key to the Vercel project and redeploy.
+That is the only thing between the live deployment and a paying customer.

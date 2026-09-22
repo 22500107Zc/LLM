@@ -22,8 +22,8 @@
  *     Node service on its own port; there is nothing here to run it.
  *   - Native embeddings (@xenova/transformers) and LanceDB. Both persist to
  *     local disk, which this runtime does not keep, and together they are
- *     larger than a function bundle is allowed to be. Retrieval therefore only
- *     works against a hosted vector database, configured through VECTOR_DB.
+ *     larger than a function bundle is allowed to be. Retrieval runs on
+ *     pgvector against the same Postgres instead - see selectVectorStore.
  *   - Agent websockets. Vercel supports websockets, but through its own
  *     upgrade mechanism rather than the express-ws the product uses.
  *
@@ -49,6 +49,38 @@ process.env.STORAGE_DIR = process.env.STORAGE_DIR || "/tmp/storage";
 require("fs").mkdirSync(path.join(process.env.STORAGE_DIR, "tmp"), {
   recursive: true,
 });
+
+/**
+ * Retrieval, on the one database this deployment already has.
+ *
+ * The default vector store is LanceDB, which writes to local disk and is not
+ * in this bundle - requiring it here would crash the chat endpoint with a
+ * module error the customer would see. pgvector is the alternative that needs
+ * no second service: it is the `pg` client against the same Postgres.
+ *
+ * Nothing here creates a table or an extension. If the database has no
+ * `vector` extension the provider answers "no embeddings" - which is true -
+ * and conversation still works; only retrieval over uploaded documents does
+ * not, and document upload is unavailable here anyway.
+ */
+/**
+ * Turns off the parts of the product this runtime cannot actually run.
+ *
+ * Agent chat is the one that bites silently: the default chat mode is
+ * "automatic", and with a tool-calling model that sends every message to the
+ * agent flow, which answers with a websocket address. Here that address goes
+ * nowhere, so the customer would watch the chat hang with no error at all.
+ */
+function disableWhatCannotWork() {
+  process.env.DISABLE_AGENT_CHAT = "true";
+}
+
+function selectVectorStore() {
+  if (!process.env.VECTOR_DB) process.env.VECTOR_DB = "pgvector";
+  if (process.env.VECTOR_DB !== "pgvector") return;
+  if (!process.env.PGVECTOR_CONNECTION_STRING)
+    process.env.PGVECTOR_CONNECTION_STRING = process.env.DATABASE_URL;
+}
 
 /**
  * Refuses to boot on a database that cannot survive a cold start.
@@ -167,6 +199,8 @@ module.exports = (request, response) => {
     return fail(response, 500, { error: "misconfigured", message: problem });
 
   if (!app && !bootError) {
+    selectVectorStore();
+    disableWhatCannotWork();
     try {
       app = build();
     } catch (error) {
