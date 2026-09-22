@@ -176,8 +176,23 @@ async function ensureCustomer(details = {}) {
  *
  * @param {{email?: string}} options
  */
-function paymentLink(options = {}) {
-  const configured = String(config.stripe.paymentLink ?? "").trim();
+/**
+ * Builds a deployment-bound Stripe Payment Link from explicit inputs.
+ *
+ * Kept separate from `paymentLink()` so the founder control plane can build
+ * the link for a DIFFERENT deployment - reading that deployment's own
+ * configured link and identifier off disk - without a second copy of these
+ * rules. One implementation means a link handed out by the console and a link
+ * handed out by the customer's own billing page cannot disagree.
+ *
+ * @param {{configuredLink?: string, deploymentId?: string, email?: string}} input
+ */
+function buildPaymentLink({
+  configuredLink = "",
+  deploymentId = "",
+  email = "",
+} = {}) {
+  const configured = String(configuredLink ?? "").trim();
   if (!configured)
     return {
       success: false,
@@ -186,7 +201,7 @@ function paymentLink(options = {}) {
         "No Stripe Payment Link is configured for this deployment. Set STRIPE_PAYMENT_LINK.",
     };
 
-  if (!config.deploymentId)
+  if (!String(deploymentId ?? "").trim())
     return {
       success: false,
       configured: true,
@@ -216,11 +231,11 @@ function paymentLink(options = {}) {
 
   // The stable matching key. Stripe returns it verbatim on the completed
   // session, so the webhook can bind without guessing.
-  url.searchParams.set("client_reference_id", config.deploymentId);
+  url.searchParams.set("client_reference_id", String(deploymentId).trim());
 
-  const email = String(options.email ?? "").trim();
+  const prefill = String(email ?? "").trim();
   // Convenience only: it prefills the checkout form. Matching never uses it.
-  if (email) url.searchParams.set("prefilled_email", email);
+  if (prefill) url.searchParams.set("prefilled_email", prefill);
 
   return {
     success: true,
@@ -232,6 +247,15 @@ function paymentLink(options = {}) {
       amountCents: PLAN.amountCents,
     },
   };
+}
+
+/** The Payment Link for THIS deployment, from its own configuration. */
+function paymentLink(options = {}) {
+  return buildPaymentLink({
+    configuredLink: config.stripe.paymentLink,
+    deploymentId: config.deploymentId,
+    email: options.email,
+  });
 }
 
 /** Whether this deployment is set up to take payment without an API call. */
@@ -637,6 +661,7 @@ async function resumeSubscription({ actor = null } = {}) {
 
 module.exports = {
   paymentLink,
+  buildPaymentLink,
   paymentLinkConfigured,
   PLAN,
   STATUS,

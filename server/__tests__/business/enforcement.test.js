@@ -280,3 +280,130 @@ describe("every AI entry point is actually gated", () => {
     );
   });
 });
+
+describe("a newly provisioned business starts unpaid", () => {
+  /** Evaluates access with a specific policy, no database involved. */
+  function evaluate(env, record) {
+    jest.resetModules();
+    Object.assign(process.env, {
+      BILLING_ENFORCEMENT_ENABLED: "true",
+      BILLING_REQUIRE_ACTIVATION: "false",
+      ...env,
+    });
+    const { Billing } = require("../../business/models/billing");
+    return Billing.evaluateAccess(record);
+  }
+
+  afterEach(() => {
+    delete process.env.BILLING_REQUIRE_ACTIVATION;
+  });
+
+  it("restricts AI usage while it is awaiting its first payment", () => {
+    const access = evaluate({ BILLING_REQUIRE_ACTIVATION: "true" }, null);
+
+    expect(access.access).toBe("restricted");
+    expect(access.reason).toBe("awaiting_activation");
+    // The customer is told what to do, and told their data is untouched.
+    expect(access.message).toMatch(/payment/i);
+    expect(access.message).toMatch(/no data is affected/i);
+  });
+
+  it("is activated by a real subscription, not by an operator toggle", () => {
+    const active = evaluate(
+      { BILLING_REQUIRE_ACTIVATION: "true" },
+      { status: "active", cancel_at_period_end: false }
+    );
+    expect(active.access).toBe("ok");
+  });
+
+  it("leaves an existing unconfigured deployment alone when the flag is off", () => {
+    // This is the pre-existing promise: never punish a paying customer for the
+    // operator not having wired Stripe up. Provisioning opts new customers in;
+    // nothing opts an existing one in behind their back.
+    const access = evaluate({}, null);
+    expect(access.access).toBe("ok");
+    expect(access.reason).toBe("unconfigured");
+  });
+
+  it("does not restrict when enforcement itself is off", () => {
+    const access = evaluate(
+      {
+        BILLING_ENFORCEMENT_ENABLED: "false",
+        BILLING_REQUIRE_ACTIVATION: "true",
+      },
+      null
+    );
+    expect(access.access).toBe("ok");
+  });
+});
+
+describe("the operator status endpoint's token guard", () => {
+  function guard(env = {}) {
+    jest.resetModules();
+    Object.assign(process.env, { HEALTHCHECK_TOKEN: "", ...env });
+    return require("../../business/middleware").strictHealthTokenGuard;
+  }
+
+  function mockResponse() {
+    return {
+      statusCode: null,
+      payload: null,
+      status(code) {
+        this.statusCode = code;
+        return this;
+      },
+      json(body) {
+        this.payload = body;
+        return this;
+      },
+      sendStatus(code) {
+        this.statusCode = code;
+        return this;
+      },
+    };
+  }
+
+  afterEach(() => {
+    delete process.env.HEALTHCHECK_TOKEN;
+  });
+
+  it("refuses entirely when no token is configured", () => {
+    const response = mockResponse();
+    let reached = false;
+    guard()({ headers: {} }, response, () => {
+      reached = true;
+    });
+
+    // 404, not 401: an unconfigured deployment does not admit the route exists.
+    expect(response.statusCode).toBe(404);
+    expect(reached).toBe(false);
+  });
+
+  it("refuses a wrong token", () => {
+    const response = mockResponse();
+    let reached = false;
+    guard({ HEALTHCHECK_TOKEN: "the-real-token" })(
+      { headers: { "x-health-token": "not-it" } },
+      response,
+      () => {
+        reached = true;
+      }
+    );
+    expect(response.statusCode).toBe(401);
+    expect(reached).toBe(false);
+  });
+
+  it("admits the configured token", () => {
+    const response = mockResponse();
+    let reached = false;
+    guard({ HEALTHCHECK_TOKEN: "the-real-token" })(
+      { headers: { "x-health-token": "the-real-token" } },
+      response,
+      () => {
+        reached = true;
+      }
+    );
+    expect(reached).toBe(true);
+    expect(response.statusCode).toBeNull();
+  });
+});

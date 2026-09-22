@@ -165,6 +165,21 @@ function healthTokenGuard(request, response, next) {
 }
 
 /**
+ * Like `healthTokenGuard`, but refuses when no token is configured.
+ *
+ * `healthTokenGuard` deliberately passes through on an unconfigured
+ * deployment so an uptime probe still works during bring-up. That is the wrong
+ * default for anything carrying operational state: with no token set, the
+ * endpoint would be open. This one answers 404 instead, so an unconfigured
+ * deployment looks like it simply has no such route.
+ */
+function strictHealthTokenGuard(request, response, next) {
+  const expected = config.security.healthCheckToken;
+  if (!expected) return response.status(404).json({ error: "Not found." });
+  return healthTokenGuard(request, response, next);
+}
+
+/**
  * Wraps an async route handler so a thrown error becomes a clean 500 with a
  * professional message, while the real detail is logged server-side only.
  */
@@ -192,5 +207,6 @@ module.exports = {
   publicCaptureLimiter,
   publicWriteLimiter,
   healthTokenGuard,
+  strictHealthTokenGuard,
   safeHandler,
 };

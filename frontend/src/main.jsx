@@ -562,6 +562,21 @@ const router = createBrowserRouter([
           return { element: <AdminRoute Component={BillingPage} /> };
         },
       },
+      // ---------------------------------------------------------------
+      // Founder control plane
+      // Deliberately NOT behind PrivateRoute: it does not use the customer
+      // session at all. It authenticates against /api/founder with its own
+      // HttpOnly cookie, and every route there refuses a request without one.
+      // On a customer's own deployment the API answers 404 and this page says
+      // it is not available.
+      // ---------------------------------------------------------------
+      {
+        path: "/founder",
+        lazy: async () => {
+          const { default: FounderConsole } = await import("@/pages/Founder");
+          return { element: <FounderConsole /> };
+        },
+      },
       // Catch-all route for 404s
       {
         path: "*",

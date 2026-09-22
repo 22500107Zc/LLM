@@ -277,7 +277,19 @@ const Billing = {
     if (!policy.enforcementEnabled) return base;
 
     if (!record || record.status === STATUS.UNCONFIGURED) {
-      // Billing has not been wired up yet - do not punish the customer.
+      // A deployment provisioned as "awaiting first payment" starts restricted
+      // and is activated by the Stripe webhook, not by an operator remembering
+      // to switch something on.
+      if (policy.requireActivation)
+        return {
+          ...base,
+          access: ACCESS.RESTRICTED,
+          reason: "awaiting_activation",
+          message:
+            "This deployment is awaiting its first subscription payment. Complete payment to activate AI usage. No data is affected.",
+        };
+      // Otherwise billing simply has not been wired up yet - do not punish the
+      // customer for the operator's configuration.
       return { ...base, access: ACCESS.OK, reason: "unconfigured" };
     }
 

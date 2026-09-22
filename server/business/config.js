@@ -178,6 +178,14 @@ const config = {
       // Enforcement is opt-in so a misconfigured deployment can never lock a
       // paying customer out of their own data.
       enforcementEnabled: bool("BILLING_ENFORCEMENT_ENABLED", false),
+      // A newly provisioned deployment has not paid yet, and the operator
+      // wants it to stay unpaid until the Stripe webhook activates it. With
+      // this on, "no subscription at all" is treated as not-yet-activated
+      // rather than as an operator oversight.
+      //
+      // Off by default, so an existing deployment's behaviour is unchanged:
+      // only provisioning writes it, and only for new customers.
+      requireActivation: bool("BILLING_REQUIRE_ACTIVATION", false),
       gracePeriodDays: Math.max(0, int("BILLING_GRACE_PERIOD_DAYS", 7)),
       // What a restricted (post-grace) deployment actually blocks.
       restrictInternalChat: bool("BILLING_RESTRICT_INTERNAL_CHAT", true),

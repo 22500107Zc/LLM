@@ -34,6 +34,70 @@ no Kubernetes requirement.
 
 ---
 
+## 2a. The founder console (optional)
+
+`scripts/operator.sh` is the complete operator interface and nothing depends on
+the console. If you would rather work from a browser, the same provisioning
+code is available behind a password at `/founder`.
+
+**It runs on the host that holds `deployments/`, and nowhere else.** A
+customer's deployment has no state directory mounted, so the console refuses to
+switch on there and every founder route answers 404 — not 401, which would
+confirm the paths exist.
+
+Generate the password hash on that host. The script reads the password with
+echo off and prints only the hash; the password itself is never written, echoed
+or passed as an argument:
+
+```bash
+node scripts/founder-password.cjs
+```
+
+Put the three lines it prints into that host's `.env`:
+
+```
+FOUNDER_CONSOLE_ENABLED=true
+FOUNDER_PASSWORD_HASH=$2b$12$…
+PLATFORM_STATE_DIR=/srv/platform/deployments
+```
+
+Then restart, and open `https://your-host/founder`.
+
+What it does:
+
+| | |
+| --- | --- |
+| Lists every business on the host | From `deployments/`, presence flags only — no secret value leaves the host |
+| Provisions a new one | The same shared service the CLI calls. Writes configuration; starts nothing |
+| Hands out the Payment Link | That business's own link with its `client_reference_id` attached |
+| Shows billing and readiness | Read from each deployment over loopback with its own `HEALTHCHECK_TOKEN` |
+| Shows unmatched payments | Inspection only — these are resolved in Stripe |
+
+What it deliberately cannot do:
+
+- **Start or stop a container.** That is the one privileged operation in the
+  platform and it stays in the CLI. The console prints the exact command.
+- **Mark a business paid.** Only the Stripe webhook does that, and only from an
+  event it can prove belongs to that deployment.
+- **Run a command.** No founder input reaches a shell, a process or Docker.
+
+A business provisioned this way **starts unpaid**: `BILLING_ENFORCEMENT_ENABLED`
+and `BILLING_REQUIRE_ACTIVATION` are both `true`, so AI usage is suspended until
+the webhook records the first payment. Nothing else is restricted and no data is
+affected. Existing deployments are unchanged — `BILLING_REQUIRE_ACTIVATION`
+defaults to `false` and only provisioning sets it.
+
+Two things to get right:
+
+- **Do not expose `/founder` publicly if you do not need it.** Restrict it at
+  the reverse proxy to your own address as well. The password is the control,
+  but there is no reason to offer the login page to the internet.
+- **A change to a `.env` needs a restart.** A running container read its
+  configuration at boot, so recording a Payment Link in the console does not
+  take effect until `./scripts/operator.sh update <slug>`.
+
+---
+
 ## 3. First deployment
 
 Every deployment is created and operated with one tool: `scripts/operator.sh`.

@@ -8,6 +8,7 @@ const {
   requireCapability,
   safeHandler,
   healthTokenGuard,
+  strictHealthTokenGuard,
 } = require("../middleware");
 const { currentAccess } = require("../middleware/billingGate");
 
@@ -182,6 +183,91 @@ function platformRoutes(router, publicRouter) {
     safeHandler(async (_request, response) => {
       const probe = await Health.probe();
       response.status(probe.status === "ok" ? 200 : 503).json(probe);
+    })
+  );
+
+  /**
+   * Operational status for the operator's control plane.
+   *
+   * The founder console runs on the host that provisioned this deployment. It
+   * reaches this over loopback using the HEALTHCHECK_TOKEN provisioning wrote
+   * into this deployment's own env file, so no new credential is introduced -
+   * the operator already holds that one.
+   *
+   * What comes back is deliberately narrow: subscription state, readiness, and
+   * the payment events that need a human. No Stripe key, no webhook signing
+   * secret, no customer data, no conversation content. The deployment
+   * identifier is returned only as a short fingerprint, enough for the console
+   * to confirm the running container matches the configuration it holds.
+   *
+   * Unlike the uptime probe, this refuses entirely when no token is set.
+   */
+  publicRouter.get(
+    "/operator-status",
+    [strictHealthTokenGuard],
+    safeHandler(async (_request, response) => {
+      const prisma = require("../../utils/prisma");
+      const { Billing } = require("../models/billing");
+
+      const summary = await Billing.publicSummary();
+      const access = await currentAccess();
+
+      let counts = {};
+      let events = [];
+      try {
+        const grouped = await prisma.billing_events.groupBy({
+          by: ["status"],
+          _count: { status: true },
+        });
+        counts = Object.fromEntries(
+          grouped.map((row) => [row.status, row._count.status])
+        );
+        events = await prisma.billing_events.findMany({
+          where: { status: { in: ["unmatched", "rejected", "failed"] } },
+          orderBy: { id: "desc" },
+          take: 20,
+        });
+      } catch {
+        // A deployment that has never received a webhook is not an error.
+        counts = {};
+        events = [];
+      }
+
+      const deploymentId = config.deploymentId;
+
+      response.status(200).json({
+        probe: await Health.probe(),
+        deployment: {
+          // Not the identifier itself - only enough to confirm a match.
+          idFingerprint: deploymentId ? deploymentId.slice(0, 8) : null,
+          publicUrl: config.deployment.publicUrl || null,
+          version: config.deployment.version,
+        },
+        billing: {
+          status: summary.subscription.status,
+          statusLabel: summary.subscription.statusLabel,
+          access: access.access,
+          reason: access.reason,
+          enforcementEnabled: access.enforcementEnabled,
+          cancelAtPeriodEnd: summary.subscription.cancelAtPeriodEnd,
+          nextBillingDate: summary.subscription.nextBillingDate,
+          customerId: summary.subscription.customerId,
+          subscriptionId: summary.subscription.subscriptionId,
+          amountCents: summary.plan.amountCents,
+          currency: summary.plan.currency,
+        },
+        events: {
+          counts,
+          needsAttention: events.length,
+          recent: events.map((event) => ({
+            stripeEventId: event.stripe_event_id,
+            type: event.type,
+            status: event.status,
+            summary: event.summary,
+            occurredAt: event.occurredAt,
+          })),
+        },
+      });
     })
   );
 

@@ -172,14 +172,11 @@ cmd_provision() {
 
   [ -n "$domain" ] || die "--domain is required."
   [ -n "$port" ]   || die "--port is required."
-  validate_domain "$domain"
-  validate_port "$port"
-  assert_no_collisions "$slug" "$port" "$domain"
+  display_name="${display_name:-$slug}"
 
   local dir env_file
   dir="$(deployment_dir "$slug")"
   env_file="$(env_file_for "$slug")"
-  display_name="${display_name:-$slug}"
 
   c_info "Provisioning '$slug'"
   c_info "  domain : $domain"
@@ -187,89 +184,37 @@ cmd_provision() {
   c_info "  project: $(project_for "$slug")"
   c_info "  state  : $dir"
 
-  run mkdir -p "$dir/backups"
   if [ "$DRY_RUN" = "1" ]; then
-    printf '\033[2m  would write %s (0600) with freshly generated secrets\033[0m\n' "$env_file"
-  else
-    umask 077
-    cat > "$env_file" <<ENVEOF
-# Deployment configuration for $display_name ($slug)
-# Generated $(date -u +%Y-%m-%dT%H:%M:%SZ). NEVER COMMIT THIS FILE.
-
-NODE_ENV=production
-SERVER_PORT=3001
-# The host port this deployment binds on loopback.
-SERVER_PORT_HOST=$port
-STORAGE_DIR=/app/server/storage
-DATABASE_URL=file:/app/server/storage/anythingllm.db
-COLLECTOR_HOTDIR=/app/collector/hotdir
-
-# --- identity ---------------------------------------------------------------
-# Immutable. Stamped into every Stripe object this deployment creates and
-# required to bind it to a Stripe customer. Never change it.
-DEPLOYMENT_ID=$(gen_secret)
-
-JWT_SECRET=$(gen_secret)
-SIG_KEY=$(gen_secret)
-SIG_SALT=$(gen_secret)
-HEALTHCHECK_TOKEN=$(gen_secret)
-
-PUBLIC_URL=https://$domain
-PRIMARY_DOMAIN=$domain
-CUSTOMER_DOMAIN=$domain
-CUSTOMER_NAME=$display_name
-COMPANY_NAME=$display_name
-APP_NAME=$display_name AI
-SUPPORT_EMAIL=
-
-# --- included limits --------------------------------------------------------
-MAX_USERS=50
-MAX_PUBLIC_AGENTS=3
-STORAGE_LIMIT_GB=25
-
-# --- security ---------------------------------------------------------------
-REQUIRE_MULTI_USER_MODE=true
-EMBED_REQUIRE_ALLOWLIST=true
-PUBLIC_RATE_LIMIT_PER_MINUTE=30
-PUBLIC_RATE_LIMIT_BURST=10
-ALLOW_PRIVATE_NETWORK_WEBHOOKS=false
-DISABLE_TELEMETRY=true
-
-# --- billing ----------------------------------------------------------------
-PLAN_AMOUNT_CENTS=388888
-STRIPE_SECRET_KEY=
-STRIPE_PUBLISHABLE_KEY=
-STRIPE_WEBHOOK_SECRET=
-STRIPE_PRICE_ID=
-STRIPE_PRODUCT_ID=
-STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID=
-STRIPE_CUSTOMER_ID=
-STRIPE_SUBSCRIPTION_ID=
-BILLING_ENFORCEMENT_ENABLED=false
-BILLING_GRACE_PERIOD_DAYS=7
-
-# --- AI provider (the CUSTOMER'S OWN credentials) ---------------------------
-LLM_PROVIDER=openai
-OPEN_AI_KEY=
-OPEN_MODEL_PREF=gpt-4o
-EMBEDDING_ENGINE=native
-VECTOR_DB=lancedb
-
-# --- notifications ----------------------------------------------------------
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_USER=
-SMTP_PASSWORD=
-SMTP_FROM=
-ENVEOF
-    chmod 600 "$env_file"
+    printf '\033[2m  would validate, check collisions, and write %s (0600)\033[0m\n' "$env_file"
+    printf '\033[2m  would write %s/caddy.conf and %s/nginx.conf\033[0m\n' "$dir" "$dir"
+    c_ok "Provisioned '$slug'."
+    return 0
   fi
 
-  # The reverse-proxy configuration this customer's domain needs.
-  if [ "$DRY_RUN" != "1" ]; then
-    write_proxy_config "$slug" "$domain" "$port"
-  else
-    printf '\033[2m  would write %s/caddy.conf and %s/nginx.conf\033[0m\n' "$dir" "$dir"
+  # Validation, collision checks, secret generation, the env file and both
+  # proxy configs all come from the SAME service the founder console uses, so
+  # the two can never drift apart. Arguments are passed as separate argv
+  # entries; nothing here is interpolated into a shell.
+  command -v node >/dev/null 2>&1 || die "node is required to provision."
+  PLATFORM_STATE_DIR="$STATE_DIR" node "$ROOT/scripts/provision-core.cjs" \
+    --slug "$slug" \
+    --domain "$domain" \
+    --port "$port" \
+    --name "$display_name" \
+    || die "Provisioning refused. Nothing was written."
+
+  # A docker volume left from a previous deployment of the same name would be
+  # silently reused, so it is checked here where docker is actually available.
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    if docker volume ls --format '{{.Name}}' 2>/dev/null | grep -q "^$(project_for "$slug")_"; then
+      c_warn "Docker volumes for $(project_for "$slug") already exist and will be reused."
+      c_warn "If this is a new customer, remove them deliberately first."
+    fi
+  fi
+
+  # Something else on the host may hold the port even when no deployment does.
+  if port_in_use "$port"; then
+    c_warn "Port $port is already in use on this host by something else."
   fi
 
   # Verify what was just written before telling the operator it is ready.

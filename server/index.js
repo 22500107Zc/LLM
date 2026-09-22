@@ -47,6 +47,7 @@ const {
 } = require("./endpoints/utils/googleAgentSkillEndpoints");
 const { memoryEndpoints } = require("./endpoints/memory");
 const { businessEndpoints } = require("./business/routes");
+const { founderRoutes } = require("./business/founder/routes");
 const { handleStripeWebhook } = require("./business/billing/webhook");
 const { bootCommercialPlatform } = require("./business/boot");
 const {
@@ -97,6 +98,12 @@ if (!!process.env.ENABLE_HTTPS) {
 } else {
   require("@mintplex-labs/express-ws").default(app); // load WebSockets in non-SSL mode.
 }
+
+// The founder control plane. Mounted BEFORE the customer API router and on
+// its own prefix, so no customer middleware, role or session can reach it and
+// it cannot reach them. Every route answers 404 unless this host is configured
+// as a control plane, which a customer's own deployment never is.
+founderRoutes(app);
 
 app.use("/api", apiRouter);
 
