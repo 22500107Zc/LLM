@@ -36,7 +36,8 @@ const { execFileSync } = require("child_process");
 const ROOT = path.resolve(__dirname, "..");
 const bcrypt = require(path.join(ROOT, "server", "node_modules", "bcryptjs"));
 
-const FOUNDER_PASSWORD = "verify-founder-" + crypto.randomBytes(8).toString("hex");
+const FOUNDER_PASSWORD =
+  "verify-founder-" + crypto.randomBytes(8).toString("hex");
 const ACME_PASSWORD = "Acme!Str0ng-Pass-1";
 const BETA_PASSWORD = "Beta!Str0ng-Pass-2";
 
@@ -51,7 +52,9 @@ function check(name, condition, detail = "") {
   } else {
     failed += 1;
     failures.push(name);
-    console.log(`  \x1b[31mFAIL\x1b[0m  ${name}${detail ? `  (${detail})` : ""}`);
+    console.log(
+      `  \x1b[31mFAIL\x1b[0m  ${name}${detail ? `  (${detail})` : ""}`
+    );
   }
 }
 
@@ -396,7 +399,10 @@ function modelProviderConfigured() {
   check("customer created", created.status === 201, `got ${created.status}`);
   const acmeId = created.payload?.customer?.id;
   const acmeUserId = created.payload?.customer?.userId;
-  check("login email is what the founder entered", created.payload?.customer?.loginEmail === "dana@acme.test");
+  check(
+    "login email is what the founder entered",
+    created.payload?.customer?.loginEmail === "dana@acme.test"
+  );
   check("starts ACTIVE", created.payload?.customer?.access === "active");
 
   const listed = await api.get("/api/founder/customers");
@@ -409,12 +415,21 @@ function modelProviderConfigured() {
   const row = await prisma.users.findFirst({
     where: { username: "dana@acme.test" },
   });
-  check("password stored as a bcrypt hash", /^\$2[aby]\$/.test(row?.password ?? ""));
-  check("plaintext password never stored", !(row?.password ?? "").includes(ACME_PASSWORD));
+  check(
+    "password stored as a bcrypt hash",
+    /^\$2[aby]\$/.test(row?.password ?? "")
+  );
+  check(
+    "plaintext password never stored",
+    !(row?.password ?? "").includes(ACME_PASSWORD)
+  );
   check("customer is not an admin", row?.role === "default");
 
   const bodies = JSON.stringify([created.payload, listed.payload]);
-  check("no password or hash in any founder response", !bodies.includes(ACME_PASSWORD) && !/\$2[aby]\$/.test(bodies));
+  check(
+    "no password or hash in any founder response",
+    !bodies.includes(ACME_PASSWORD) && !/\$2[aby]\$/.test(bodies)
+  );
 
   // ---------------------------------------------------------- customer login
   section("Customer login");
@@ -463,13 +478,20 @@ function modelProviderConfigured() {
   section("AI workflow");
   const workspaceSlug = firstLook[0]?.slug;
   const answer = workspaceSlug
-    ? await chat(token, workspaceSlug, "In one sentence, what is a purchase order?")
+    ? await chat(
+        token,
+        workspaceSlug,
+        "In one sentence, what is a purchase order?"
+      )
     : null;
 
   if (!workspaceSlug) {
     check("customer has a workspace to chat in", false, "no workspace");
   } else if (modelProviderConfigured()) {
-    check("the chat endpoint accepts the customer's message", answer.status === 200);
+    check(
+      "the chat endpoint accepts the customer's message",
+      answer.status === 200
+    );
     check("the assistant answered", !answer.error, answer.error ?? "");
     check(
       "the answer is real text, not an empty stream",
@@ -568,7 +590,10 @@ function modelProviderConfigured() {
     const stored = await prisma.workspace_chats.findMany({
       where: { workspaceId: firstLook[0].id },
     });
-    check("the turn was written to the customer's chat history", stored.length > 0);
+    check(
+      "the turn was written to the customer's chat history",
+      stored.length > 0
+    );
     check(
       "the stored turn belongs to that customer and no one else",
       stored.every((row) => row.user_id === acmeUserId)
@@ -586,12 +611,50 @@ function modelProviderConfigured() {
     else process.env[key] = restore[key];
   await endpoint.close();
 
+  // ------------------------------------------- what an unconfigured deploy says
+  //
+  // Before this deployment has a database there are no customers, but the
+  // login page is still reachable, and what it says matters. The founder needs
+  // the real reason; nobody else should be reading about environment
+  // variables.
+  section("An unconfigured deployment");
+  const realDatabaseUrl = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL;
+
+  const customerSees = await call("GET", "/api/workspaces");
+  check(
+    "a customer gets a service message, not a 500",
+    customerSees.status === 503
+  );
+  check(
+    "no infrastructure detail in it",
+    !/database_url|postgres|sqlite|prisma|serverless/i.test(
+      JSON.stringify(customerSees.payload)
+    ),
+    JSON.stringify(customerSees.payload)
+  );
+  const founderSees = await call("GET", "/api/founder/session");
+  check(
+    "the founder is told exactly what is missing",
+    /DATABASE_URL/.test(String(founderSees.payload?.message ?? "")),
+    JSON.stringify(founderSees.payload)
+  );
+
+  process.env.DATABASE_URL = realDatabaseUrl;
+  check(
+    "the product serves again once it has a database",
+    (await useProduct(token)).status === 200
+  );
+
   // -------------------------------------------------------- disable/restore
   section("Founder-controlled access");
   const disabled = await api.post(`/api/founder/customers/${acmeId}/access`, {
     access: "disabled",
   });
-  check("founder disables the customer", disabled.payload?.customer?.access === "disabled");
+  check(
+    "founder disables the customer",
+    disabled.payload?.customer?.access === "disabled"
+  );
 
   const afterDisable = await useProduct(token);
   check(
@@ -601,7 +664,8 @@ function modelProviderConfigured() {
   );
   check(
     "disabled customer cannot sign in again",
-    (await customerLogin("dana@acme.test", ACME_PASSWORD)).payload?.valid === false
+    (await customerLogin("dana@acme.test", ACME_PASSWORD)).payload?.valid ===
+      false
   );
   check(
     "disabling deletes nothing",
@@ -611,11 +675,17 @@ function modelProviderConfigured() {
   const restored = await api.post(`/api/founder/customers/${acmeId}/access`, {
     access: "active",
   });
-  check("founder restores access", restored.payload?.customer?.access === "active");
+  check(
+    "founder restores access",
+    restored.payload?.customer?.access === "active"
+  );
   const back = await customerLogin("dana@acme.test", ACME_PASSWORD);
   check("restored customer signs in again", back.payload?.valid === true);
   token = back.payload?.token;
-  check("restored customer reaches the product", (await useProduct(token)).status === 200);
+  check(
+    "restored customer reaches the product",
+    (await useProduct(token)).status === 200
+  );
 
   // ------------------------------------------------------------ credentials
   section("Founder-managed credentials");
@@ -626,11 +696,13 @@ function modelProviderConfigured() {
   check("founder sets a new password", reset.status === 200);
   check(
     "old password stops working",
-    (await customerLogin("dana@acme.test", ACME_PASSWORD)).payload?.valid === false
+    (await customerLogin("dana@acme.test", ACME_PASSWORD)).payload?.valid ===
+      false
   );
   check(
     "new password works",
-    (await customerLogin("dana@acme.test", NEXT_PASSWORD)).payload?.valid === true
+    (await customerLogin("dana@acme.test", NEXT_PASSWORD)).payload?.valid ===
+      true
   );
 
   const changed = await api.post(`/api/founder/customers/${acmeId}/email`, {
@@ -639,11 +711,13 @@ function modelProviderConfigured() {
   check("founder changes the login email", changed.status === 200);
   check(
     "old email stops working",
-    (await customerLogin("dana@acme.test", NEXT_PASSWORD)).payload?.valid === false
+    (await customerLogin("dana@acme.test", NEXT_PASSWORD)).payload?.valid ===
+      false
   );
   check(
     "new email works",
-    (await customerLogin("newdana@acme.test", NEXT_PASSWORD)).payload?.valid === true
+    (await customerLogin("newdana@acme.test", NEXT_PASSWORD)).payload?.valid ===
+      true
   );
 
   // --------------------------------------------------------------- isolation
@@ -657,8 +731,10 @@ function modelProviderConfigured() {
 
   check(
     "one customer's password does not open the other's account",
-    (await customerLogin("newdana@acme.test", BETA_PASSWORD)).payload?.valid === false &&
-      (await customerLogin("sam@beta.test", NEXT_PASSWORD)).payload?.valid === false
+    (await customerLogin("newdana@acme.test", BETA_PASSWORD)).payload?.valid ===
+      false &&
+      (await customerLogin("sam@beta.test", NEXT_PASSWORD)).payload?.valid ===
+        false
   );
 
   const acmeSession = await customerLogin("newdana@acme.test", NEXT_PASSWORD);
@@ -669,7 +745,9 @@ function modelProviderConfigured() {
   );
 
   // Workspace membership is the product's own isolation primitive.
-  const { Workspace } = require(path.join(ROOT, "server", "models", "workspace"));
+  const { Workspace } = require(
+    path.join(ROOT, "server", "models", "workspace")
+  );
   const { User } = require(path.join(ROOT, "server", "models", "user"));
   const { workspace: acmeWorkspace } = await Workspace.new(
     "Acme Private",
@@ -681,7 +759,10 @@ function modelProviderConfigured() {
   );
   const acmeUser = await User.get({ id: acmeSession.payload.user.id });
   const visible = (await Workspace.whereWithUser(acmeUser)).map((w) => w.slug);
-  check("customer sees their own workspace", visible.includes(acmeWorkspace.slug));
+  check(
+    "customer sees their own workspace",
+    visible.includes(acmeWorkspace.slug)
+  );
   check(
     "customer CANNOT see the other customer's workspace",
     !visible.includes(betaWorkspace.slug)
@@ -692,7 +773,8 @@ function modelProviderConfigured() {
     headers: { Authorization: `Bearer ${acmeSession.payload.token}` },
   });
   const leaked =
-    direct.status === 200 && direct.payload?.workspace?.slug === betaWorkspace.slug;
+    direct.status === 200 &&
+    direct.payload?.workspace?.slug === betaWorkspace.slug;
   check(
     "direct API request for the other customer's workspace is refused",
     !leaked,
@@ -708,7 +790,11 @@ function modelProviderConfigured() {
         Cookie: `founder_session=${acmeSession.payload.token}`,
       },
     });
-    check(`${route} refuses a customer session`, asCustomer.status === 401, `got ${asCustomer.status}`);
+    check(
+      `${route} refuses a customer session`,
+      asCustomer.status === 401,
+      `got ${asCustomer.status}`
+    );
   }
 
   // --------------------------------------------------------------- no Stripe
@@ -750,7 +836,8 @@ function modelProviderConfigured() {
   );
   check(
     "a customer created before the restart can still sign in",
-    (await customerLogin("newdana@acme.test", NEXT_PASSWORD)).payload?.valid === true
+    (await customerLogin("newdana@acme.test", NEXT_PASSWORD)).payload?.valid ===
+      true
   );
   // The founder's in-memory session is gone, which is correct.
   const staleFounder = await call("GET", "/api/founder/customers", {
@@ -762,7 +849,10 @@ function modelProviderConfigured() {
     `got ${staleFounder.status}`
   );
   const freshFounder = founder();
-  check("founder can sign in again after the restart", (await freshFounder.login()).status === 200);
+  check(
+    "founder can sign in again after the restart",
+    (await freshFounder.login()).status === 200
+  );
 
   // ----------------------------------------------------------------- removal
   section("Removal");
@@ -770,14 +860,18 @@ function modelProviderConfigured() {
   const refused = await freshFounder.del(`/api/founder/customers/${betaId}`, {
     confirmBusinessName: "wrong name",
   });
-  check("removal refused without the business name typed back", refused.status === 400);
+  check(
+    "removal refused without the business name typed back",
+    refused.status === 400
+  );
   const removed = await freshFounder.del(`/api/founder/customers/${betaId}`, {
     confirmBusinessName: "Beta Industries",
   });
   check("removal succeeds when confirmed", removed.status === 200);
   check(
     "removed customer can no longer sign in",
-    (await customerLogin("sam@beta.test", BETA_PASSWORD)).payload?.valid === false
+    (await customerLogin("sam@beta.test", BETA_PASSWORD)).payload?.valid ===
+      false
   );
 
   await shutdown();

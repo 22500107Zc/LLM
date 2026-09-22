@@ -129,9 +129,7 @@ function build() {
   const apiRouter = express.Router();
   application.use("/api", apiRouter);
 
-  const {
-    requireAuthenticatedMode,
-  } = require(
+  const { requireAuthenticatedMode } = require(
     path.join(SERVER_DIR, "business", "middleware", "requireAuthenticatedMode")
   );
   apiRouter.use(requireAuthenticatedMode);
@@ -193,10 +191,33 @@ function fail(response, status, body) {
   response.end(payload);
 }
 
+/**
+ * Whether this request came from the founder's own console.
+ *
+ * The founder is the person who can fix a misconfiguration and needs to be
+ * told what it is. A customer is not, and telling them which environment
+ * variable is missing is both useless to them and more than they should know
+ * about how this runs.
+ */
+const isFounderSurface = (request) =>
+  String(request.url ?? "").startsWith("/api/founder");
+
 module.exports = (request, response) => {
   const problem = persistenceProblem();
-  if (problem)
-    return fail(response, 500, { error: "misconfigured", message: problem });
+  if (problem) {
+    console.error("[vercel] refusing to serve:", problem);
+    return fail(
+      response,
+      503,
+      isFounderSurface(request)
+        ? { error: "misconfigured", message: problem }
+        : {
+            error: "unavailable",
+            message:
+              "The service is not available right now. Please try again shortly.",
+          }
+    );
+  }
 
   if (!app && !bootError) {
     selectVectorStore();

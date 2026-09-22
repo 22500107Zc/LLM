@@ -37,13 +37,18 @@ because document upload is unavailable here anyway (see §3).
 /founder          200   (SPA route)
 /login            200   (SPA route)
 /assets/*.js      200
-/api/*            500   {"error":"misconfigured","message":"DATABASE_URL is not set…"}
+/api/*            503   {"error":"unavailable","message":"The service is not available right now…"}
+/api/founder/*    503   {"error":"misconfigured","message":"DATABASE_URL is not set…"}
 ```
 
-The 500 is correct and deliberate. The serverless function boots, loads the
+The 503 is correct and deliberate. The serverless function boots, loads the
 whole application and answers — then refuses every API call because it has
 nowhere durable to keep customer accounts. A founder would otherwise create a
 customer, watch it succeed, and find it gone after the next cold start.
+
+The two bodies differ on purpose. The founder is the person who can fix this
+and is told exactly what is missing; anyone else gets a service message,
+because which environment variable is unset is not theirs to read.
 
 Neither the served HTML nor the JavaScript bundle contains the founder
 password hash. Checked on the live deployment, not locally.
@@ -55,7 +60,7 @@ the real Vercel entry point — over a real socket against a real Postgres, with
 every `STRIPE_*` variable deleted from the process:
 
 ```
-COMMERCIAL LOOP: 70 passed, 0 failed, 1 blocked
+COMMERCIAL LOOP: 74 passed, 0 failed, 1 blocked
 ```
 
 The one blocked item is a model provider key, which this machine does not
