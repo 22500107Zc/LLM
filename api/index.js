@@ -1,0 +1,162 @@
+/**
+ * Vercel serverless entry point.
+ *
+ * WHAT THIS IS
+ *
+ * The same application, assembled for a runtime with no durable filesystem and
+ * no long-running process. It mounts the parts of the product that genuinely
+ * work there and deliberately leaves out the parts that do not, rather than
+ * mounting everything and letting a customer discover the difference by
+ * hitting an error.
+ *
+ * WHAT WORKS HERE
+ *
+ *   - the founder console and its API (/api/founder/*)
+ *   - customer login (/api/request-token) and session validation
+ *   - the business API (/api/business/*) and the platform surface
+ *   - admin, workspace, invite and system endpoints
+ *
+ * WHAT DOES NOT, AND WHY
+ *
+ *   - Document upload and parsing. The collector is a second long-running
+ *     Node service on its own port; there is nothing here to run it.
+ *   - Native embeddings (@xenova/transformers) and LanceDB. Both persist to
+ *     local disk, which this runtime does not keep, and together they are
+ *     larger than a function bundle is allowed to be. Retrieval therefore only
+ *     works against a hosted vector database, configured through VECTOR_DB.
+ *   - Agent websockets. Vercel supports websockets, but through its own
+ *     upgrade mechanism rather than the express-ws the product uses.
+ *
+ * See VERCEL.md for the measurements behind each of those.
+ *
+ * PERSISTENCE
+ *
+ * DATABASE_URL must point at Postgres. On SQLite every customer account, every
+ * password hash and every access decision would be lost the next time the
+ * function cold-starts. This file refuses to pretend otherwise: it fails
+ * loudly at boot rather than serving a login page backed by a disk that is
+ * about to disappear.
+ */
+
+const path = require("path");
+
+const SERVER_DIR = path.resolve(__dirname, "..", "server");
+
+// Anything that insists on a writable path gets the one writable path there
+// is. It is per-instance and temporary, which is correct for scratch space and
+// would be wrong for anything else.
+process.env.STORAGE_DIR = process.env.STORAGE_DIR || "/tmp/storage";
+require("fs").mkdirSync(path.join(process.env.STORAGE_DIR, "tmp"), {
+  recursive: true,
+});
+
+/**
+ * Refuses to boot on a database that cannot survive a cold start.
+ *
+ * Returning a clear 500 is better than appearing to work: a founder would
+ * otherwise create a customer, see it succeed, and find it gone an hour later.
+ */
+function persistenceProblem() {
+  const url = String(process.env.DATABASE_URL ?? "").trim();
+  if (!url)
+    return "DATABASE_URL is not set. This deployment needs a Postgres connection string; customer accounts cannot be stored on a serverless filesystem.";
+  if (url.startsWith("file:") || url.endsWith(".db"))
+    return "DATABASE_URL points at a SQLite file. A serverless instance does not keep its filesystem, so every customer account would be lost on the next cold start. Use Postgres.";
+  return null;
+}
+
+let app = null;
+let bootError = null;
+
+function build() {
+  const express = require("express");
+  const bodyParser = require("body-parser");
+  const cors = require("cors");
+
+  const application = express();
+  application.disable("x-powered-by");
+
+  // Vercel terminates TLS and forwards the client address. Without this,
+  // `request.ip` is the proxy, and the founder login rate limit would count
+  // every attempt in the world against one bucket.
+  application.set("trust proxy", true);
+
+  application.use(cors({ origin: true }));
+  application.use(bodyParser.text({ limit: "10mb" }));
+  application.use(bodyParser.json({ limit: "10mb" }));
+  application.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
+
+  // The founder plane first, on its own prefix, exactly as the long-running
+  // server mounts it - ahead of the customer API and sharing none of its
+  // middleware.
+  const { founderRoutes } = require(
+    path.join(SERVER_DIR, "business", "founder", "routes")
+  );
+  founderRoutes(application);
+
+  const apiRouter = express.Router();
+  application.use("/api", apiRouter);
+
+  const {
+    requireAuthenticatedMode,
+  } = require(
+    path.join(SERVER_DIR, "business", "middleware", "requireAuthenticatedMode")
+  );
+  apiRouter.use(requireAuthenticatedMode);
+
+  // The product's own endpoints. Login lives in systemEndpoints.
+  require(path.join(SERVER_DIR, "endpoints", "system")).systemEndpoints(
+    apiRouter
+  );
+  require(path.join(SERVER_DIR, "endpoints", "admin")).adminEndpoints(
+    apiRouter
+  );
+  require(path.join(SERVER_DIR, "endpoints", "invite")).inviteEndpoints(
+    apiRouter
+  );
+  require(path.join(SERVER_DIR, "endpoints", "workspaces")).workspaceEndpoints(
+    apiRouter
+  );
+  require(
+    path.join(SERVER_DIR, "endpoints", "workspaceThreads")
+  ).workspaceThreadEndpoints(apiRouter);
+  require(path.join(SERVER_DIR, "endpoints", "chat")).chatEndpoints(apiRouter);
+
+  // The commercial business API.
+  require(path.join(SERVER_DIR, "business", "routes")).businessEndpoints(
+    apiRouter
+  );
+
+  // Says plainly what is not available here rather than failing obscurely.
+  const unavailable = (feature) => (_request, response) =>
+    response.status(501).json({
+      error: "not_available_on_this_deployment",
+      message: `${feature} is not available on the serverless deployment. See VERCEL.md.`,
+    });
+
+  apiRouter.use("/document", unavailable("Document upload and parsing"));
+  apiRouter.use("/agent-invocation", unavailable("Agent websockets"));
+
+  return application;
+}
+
+module.exports = (request, response) => {
+  const problem = persistenceProblem();
+  if (problem)
+    return response.status(500).json({ error: "misconfigured", message: problem });
+
+  if (!app && !bootError) {
+    try {
+      app = build();
+    } catch (error) {
+      bootError = error;
+      console.error("[vercel] failed to build the application:", error);
+    }
+  }
+  if (bootError)
+    return response
+      .status(500)
+      .json({ error: "boot_failed", message: bootError.message });
+
+  return app(request, response);
+};
