@@ -383,6 +383,20 @@ function founderRoutes(app) {
     [auth.requireFounder],
     safeHandler(async (_request, response) => {
       const provider = process.env.LLM_PROVIDER || "openai";
+
+      // Names only, never values. If there is no model, the founder's first
+      // question is "why", and the answer is almost always which of these is
+      // missing from the deployment.
+      const configured = [
+        "VERCEL_OIDC_TOKEN",
+        "LLM_PROVIDER",
+        "GENERIC_OPEN_AI_BASE_PATH",
+        "GENERIC_OPEN_AI_MODEL_PREF",
+        "GENERIC_OPEN_AI_API_KEY",
+        "OPEN_AI_KEY",
+        "ANTHROPIC_API_KEY",
+        "DATABASE_URL",
+      ].filter((key) => String(process.env[key] ?? "").trim().length > 0);
       const model =
         process.env.GENERIC_OPEN_AI_MODEL_PREF ||
         process.env.OPEN_MODEL_PREF ||
@@ -410,6 +424,7 @@ function founderRoutes(app) {
           ok: text.length > 0,
           provider,
           model,
+          configured,
           sample: text.slice(0, 200),
         });
       } catch (error) {
@@ -418,6 +433,7 @@ function founderRoutes(app) {
           ok: false,
           provider,
           model,
+          configured,
           // The founder is the one person who should see the real reason.
           reason: String(error.message ?? error).slice(0, 300),
         });
