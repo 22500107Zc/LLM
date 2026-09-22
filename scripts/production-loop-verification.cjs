@@ -338,13 +338,25 @@ function modelProviderConfigured() {
   });
 
   // Individual customer accounts means multi-user mode.
+  // The same bootstrap a real deployment runs. Seeding settings by hand here
+  // is how a database that production could never sign in to still passed
+  // every check in this file.
+  execFileSync(
+    "node",
+    [path.join(ROOT, "scripts", "production-bootstrap.cjs")],
+    {
+      cwd: ROOT,
+      env: process.env,
+      stdio: "ignore",
+    }
+  );
+
   execFileSync(
     "node",
     [
       "-e",
       `const p=require("${path.join(ROOT, "server", "utils", "prisma")}");
        (async()=>{
-         await p.system_settings.upsert({where:{label:"multi_user_mode"},update:{value:"true"},create:{label:"multi_user_mode",value:"true"}});
          await p.business_customers.deleteMany({});
          await p.users.deleteMany({});
          process.exit(0);

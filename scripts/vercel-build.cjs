@@ -144,6 +144,16 @@ if (persistence.ok) {
     ROOT,
     direct ? { DATABASE_URL: direct } : {}
   );
+
+  // A schema is not a usable deployment. This puts the settings a brand new
+  // database needs in place - without them every customer login answers 500
+  // on an otherwise healthy deployment. Idempotent; runs on every deploy.
+  run(
+    "node",
+    [path.join("scripts", "production-bootstrap.cjs")],
+    ROOT,
+    direct ? { DATABASE_URL: direct } : {}
+  );
 } else {
   console.warn(
     [
