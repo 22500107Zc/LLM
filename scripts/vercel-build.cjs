@@ -111,7 +111,15 @@ if (persistence.ok) {
 
 // ---------------------------------------------------------------- frontend --
 
-run("npm", ["install", "--legacy-peer-deps", "--no-audit", "--no-fund"], FRONTEND);
+// --include=dev is not optional here: Vercel sets NODE_ENV=production, which
+// makes npm skip devDependencies, and vite - the thing that builds the
+// frontend - is one of them.
+run(
+  "npm",
+  ["install", "--include=dev", "--legacy-peer-deps", "--no-audit", "--no-fund"],
+  FRONTEND,
+  { NODE_ENV: "development" }
+);
 run("npm", ["run", "build"], FRONTEND);
 
 const dist = path.join(FRONTEND, "dist");
