@@ -387,6 +387,11 @@ function founderRoutes(app) {
       // Names only, never values. If there is no model, the founder's first
       // question is "why", and the answer is almost always which of these is
       // missing from the deployment.
+      //
+      // DATABASE_URL is deliberately not in this list. The application gives
+      // itself a local SQLite fallback when none is set, so its mere presence
+      // means nothing - reporting it as configured would say the deployment
+      // has a database when it has a file that disappears.
       const configured = [
         "VERCEL_OIDC_TOKEN",
         "LLM_PROVIDER",
@@ -395,8 +400,13 @@ function founderRoutes(app) {
         "GENERIC_OPEN_AI_API_KEY",
         "OPEN_AI_KEY",
         "ANTHROPIC_API_KEY",
-        "DATABASE_URL",
       ].filter((key) => String(process.env[key] ?? "").trim().length > 0);
+
+      const url = String(process.env.DATABASE_URL ?? "").trim();
+      const database =
+        !url || url.startsWith("file:") || url.endsWith(".db")
+          ? "not configured - customer accounts cannot be stored"
+          : "postgres";
       const model =
         process.env.GENERIC_OPEN_AI_MODEL_PREF ||
         process.env.OPEN_MODEL_PREF ||
@@ -425,6 +435,7 @@ function founderRoutes(app) {
           provider,
           model,
           configured,
+          database,
           sample: text.slice(0, 200),
         });
       } catch (error) {
@@ -434,6 +445,7 @@ function founderRoutes(app) {
           provider,
           model,
           configured,
+          database,
           // The founder is the one person who should see the real reason.
           reason: String(error.message ?? error).slice(0, 300),
         });
