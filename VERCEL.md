@@ -66,7 +66,7 @@ COMMERCIAL LOOP: 86 passed, 0 failed, 1 blocked
 The one blocked item is a model provider key, which this machine does not
 have. It is reported as blocked, never as passed.
 
-## 1c. Six real problems the deployment surfaced
+## 1c. Seven real problems the deployment surfaced
 
 Each of these failed for real and was fixed, not worked around:
 
@@ -90,6 +90,17 @@ Each of these failed for real and was fixed, not worked around:
    the agent flow — which answers with a websocket address. There are no
    websockets here, so the browser would have waited forever with no error.
    `api/index.js` now turns agent chat off on this runtime and says so.
+
+7. **The frontend bundle contained the server's secrets.** Upstream's vite
+   config carried `define: { "process.env": process.env }`, which inlines the
+   build machine's entire environment. On this runner that put
+   `FOUNDER_PASSWORD_HASH`, `JWT_SECRET`, `SIG_KEY` and `SIG_SALT` into
+   `dist/index.js`, downloadable by anyone. Found by scanning the deployed
+   bundle — the repository was clean throughout, which is why a source-only
+   scan never saw it. The config now exposes `NODE_ENV` only, the build fails
+   if any secret value appears in a built file, and the three machine-generated
+   secrets were rotated. The founder password hash still needs replacing; see
+   PROGRESS.md "Next action".
 
 There was also a bug in my own provider switcher: its first version matched the
 commented-out Postgres block in the schema and rewrote the documentation
