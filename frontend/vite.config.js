@@ -10,19 +10,31 @@ dns.setDefaultResultOrder("verbatim")
 // https://vitejs.dev/config/
 export default defineConfig({
   assetsInclude: [
-    './public/piper/ort-wasm-simd-threaded.wasm',
-    './public/piper/piper_phonemize.wasm',
-    './public/piper/piper_phonemize.data',
+    "./public/piper/ort-wasm-simd-threaded.wasm",
+    "./public/piper/piper_phonemize.wasm",
+    "./public/piper/piper_phonemize.data"
   ],
   worker: {
-    format: 'es'
+    format: "es"
   },
   server: {
     port: 3000,
     host: "localhost"
   },
+  // NEVER put `process.env` here.
+  //
+  // Upstream had `"process.env": process.env`, which inlines the build
+  // machine's ENTIRE environment into the browser bundle. On a laptop that is
+  // noise. On a CI runner holding production secrets it published the founder
+  // password hash, JWT_SECRET, SIG_KEY and SIG_SALT to anyone who opened the
+  // JavaScript - which is what happened, and is why this is written down.
+  //
+  // The application's own code reads `import.meta.env.VITE_*`, which Vite
+  // already restricts to VITE_-prefixed variables. This exists only so
+  // third-party CommonJS dependencies that branch on NODE_ENV still build.
   define: {
-    "process.env": process.env
+    "process.env": {},
+    "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV || "production")
   },
   css: {
     postcss
@@ -60,15 +72,15 @@ export default defineConfig({
       output: {
         // These settings ensure the primary JS and CSS file references are always index.{js,css}
         // so we can SSR the index.html as text response from server/index.js without breaking references each build.
-        entryFileNames: 'index.js',
+        entryFileNames: "index.js",
         assetFileNames: (assetInfo) => {
-          if (assetInfo.name === 'index.css') return `index.css`;
-          return assetInfo.name;
-        },
+          if (assetInfo.name === "index.css") return `index.css`
+          return assetInfo.name
+        }
       },
       external: [
         // Reduces transformation time by 50% and we don't even use this variant, so we can ignore.
-        /@phosphor-icons\/react\/dist\/ssr/,
+        /@phosphor-icons\/react\/dist\/ssr/
       ]
     },
     commonjsOptions: {

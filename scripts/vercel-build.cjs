@@ -70,7 +70,12 @@ run("node", [path.join("scripts", "prisma-provider.cjs"), "postgresql"], ROOT);
 // a database.
 run(
   "npx",
-  ["prisma", "generate", "--schema", path.join("server", "prisma", "schema.prisma")],
+  [
+    "prisma",
+    "generate",
+    "--schema",
+    path.join("server", "prisma", "schema.prisma"),
+  ],
   ROOT
 );
 
@@ -137,5 +142,75 @@ if (fs.existsSync(renamed) && !fs.existsSync(index)) {
 
 if (!fs.existsSync(index))
   fail("The frontend build produced no dist/index.html.");
+
+// ------------------------------------------------------------- leak gate --
+
+/**
+ * Refuses to publish a frontend that contains a server secret.
+ *
+ * This is not hypothetical. Upstream's vite config carried
+ * `define: { "process.env": process.env }`, which inlines the build machine's
+ * entire environment into the bundle. On a laptop that is noise; on this
+ * runner it published FOUNDER_PASSWORD_HASH, JWT_SECRET, SIG_KEY and SIG_SALT
+ * to anyone who opened the JavaScript.
+ *
+ * The config is fixed. This exists because the next way it happens will not
+ * look like the last one: it searches the built files for the VALUES of the
+ * secrets this build actually holds, so any future route to the same outcome
+ * fails the build instead of shipping.
+ */
+const SECRET_KEYS = [
+  "FOUNDER_PASSWORD_HASH",
+  "JWT_SECRET",
+  "SIG_KEY",
+  "SIG_SALT",
+  "DATABASE_URL",
+  "OPEN_AI_KEY",
+  "ANTHROPIC_API_KEY",
+  "GEMINI_API_KEY",
+  "AZURE_OPENAI_KEY",
+  "GROQ_API_KEY",
+  "OPENROUTER_API_KEY",
+  "MISTRAL_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "XAI_LLM_API_KEY",
+  "TOGETHER_AI_API_KEY",
+  "PGVECTOR_CONNECTION_STRING",
+];
+
+function builtFiles(dir) {
+  const found = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...builtFiles(full));
+    else if (/\.(js|css|html|json|map)$/.test(entry.name)) found.push(full);
+  }
+  return found;
+}
+
+const secrets = SECRET_KEYS.map((key) => [key, String(process.env[key] ?? "")])
+  // A short value would match by accident and say nothing.
+  .filter(([, value]) => value.trim().length >= 12);
+
+const leaks = [];
+for (const file of builtFiles(dist)) {
+  const contents = fs.readFileSync(file, "utf8");
+  for (const [key, value] of secrets)
+    if (contents.includes(value))
+      leaks.push(`${key} in ${path.relative(dist, file)}`);
+}
+
+if (leaks.length) {
+  // The names, never the values - a build log is not a safe place either.
+  console.error("\n[vercel-build] SECRETS FOUND IN THE FRONTEND BUNDLE:");
+  for (const leak of leaks) console.error(`  - ${leak}`);
+  fail(
+    "Refusing to publish. Fix the leak, then rotate every secret listed above - they are compromised from the moment a build carrying them is served."
+  );
+}
+
+console.log(
+  `[vercel-build] leak gate: checked ${secrets.length} secret value(s) against the built frontend, none present`
+);
 
 console.log("\n[vercel-build] done");

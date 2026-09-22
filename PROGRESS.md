@@ -144,8 +144,8 @@ Two AI sections, deliberately separate:
 ## Test status
 
 ```
-npx jest                       1531 passed, 3 failed (ffmpeg), 1534 total
-npx jest __tests__/business     439 passed, 439 total   (run from server/)
+npx jest                       1534 passed, 3 failed (ffmpeg), 1537 total
+npx jest __tests__/business     442 passed, 442 total   (run from server/)
 node scripts/production-loop-verification.cjs   86 passed, 0 failed, 1 blocked
 ./scripts/final-verification.sh 19 passed, 1 failed, 3 blocked
 ./scripts/operator-backup-test.sh   18 passed, 0 failed
@@ -161,6 +161,35 @@ a worktree at `origin/master` (untouched upstream) and gets the same 3 failures;
 the ffmpeg source and tests are byte-identical to upstream.
 
 ---
+
+## One real leak, found on the live deployment
+
+Worth knowing about, because the cause is upstream and will come back if
+someone reverts the fix.
+
+`frontend/vite.config.js` carried `define: { "process.env": process.env }`.
+That inlines the **build machine's entire environment** into the browser
+bundle. On a developer's laptop it is noise. On a CI runner holding production
+secrets it published `FOUNDER_PASSWORD_HASH`, `JWT_SECRET`, `SIG_KEY` and
+`SIG_SALT` in `dist/index.js`, downloadable by anyone.
+
+Found by scanning the deployed bundle, not the repository — the repository was
+clean the whole time, which is exactly why a source-only scan missed it.
+
+What was done:
+
+1. The config now exposes `NODE_ENV` and nothing else.
+2. `scripts/vercel-build.cjs` **fails the build** if any secret value in the
+   build environment appears in a built file. It searches for values, not
+   names, so the next route to the same outcome does not ship. It prints names
+   only, never values.
+3. `server/__tests__/business/frontendSecrets.test.js` catches the config
+   itself in a second, without a build.
+4. `JWT_SECRET`, `SIG_KEY` and `SIG_SALT` were rotated in the Vercel project.
+
+**Still outstanding:** the founder password hash was exposed and must be
+replaced — a new password has to be chosen, which is not something this
+session can do. See "Next action".
 
 ## Known issues
 
@@ -283,5 +312,12 @@ workspaces, conversation, retrieval over pgvector — runs there.
 
 ## Next action
 
-Add `DATABASE_URL` and a model provider key to the Vercel project and redeploy.
-That is the only thing between the live deployment and a paying customer.
+In the Vercel project's environment variables, set four values and redeploy:
+
+| Variable | Why |
+| --- | --- |
+| `DATABASE_URL` | A Postgres connection string. The build creates the schema itself. |
+| `OPEN_AI_KEY` | Or another provider's key, with `LLM_PROVIDER` set to match. |
+| `FOUNDER_PASSWORD_HASH` | **Rotate it.** The old one was served in the bundle. Generate a new one with `node scripts/founder-password.cjs`. |
+
+`JWT_SECRET`, `SIG_KEY` and `SIG_SALT` were already rotated and need nothing.
