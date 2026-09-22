@@ -79,7 +79,56 @@ run(
   ROOT
 );
 
+/**
+ * The connection schema changes must go through.
+ *
+ * Supabase offers two poolers and they are not interchangeable. The
+ * transaction pooler (6543) hands a different backend connection to every
+ * statement, so it cannot hold the session-scoped advisory lock Prisma's
+ * migration engine takes before touching the schema - `db push` against it
+ * does not fail, it simply waits forever, which is exactly how the previous
+ * deployment hung.
+ *
+ * DDL therefore goes through DIRECT_URL, the session pooler on 5432, where a
+ * connection belongs to one client for its lifetime. Runtime traffic is
+ * unaffected and keeps using DATABASE_URL.
+ *
+ * `pgbouncer=true` is stripped if it is present: it tells Prisma to give up
+ * prepared statements, which the session pooler has no need for.
+ *
+ * With no DIRECT_URL this returns DATABASE_URL, so a deployment against a
+ * plain Postgres with no pooler behaves exactly as it did before.
+ */
+function migrationUrl() {
+  const direct = String(process.env.DIRECT_URL ?? "").trim();
+  if (!direct) return null;
+
+  let url;
+  try {
+    url = new URL(direct);
+  } catch {
+    fail("DIRECT_URL is not a valid connection string.");
+  }
+  if (!url.protocol.startsWith("postgres"))
+    fail("DIRECT_URL must be a PostgreSQL connection string.");
+
+  url.searchParams.delete("pgbouncer");
+  url.searchParams.delete("connection_limit");
+  // A hang is worse than a failure: make the engine give up and say so.
+  if (!url.searchParams.has("connect_timeout"))
+    url.searchParams.set("connect_timeout", "30");
+
+  return url.toString();
+}
+
 if (persistence.ok) {
+  const direct = migrationUrl();
+  console.log(
+    direct
+      ? "[vercel-build] applying the schema through DIRECT_URL (session pooler)"
+      : "[vercel-build] no DIRECT_URL set; applying the schema through DATABASE_URL"
+  );
+
   // `db push` rather than `migrate deploy`: the committed migration history is
   // SQLite DDL and will not apply to Postgres.
   run(
@@ -92,7 +141,8 @@ if (persistence.ok) {
       path.join("server", "prisma", "schema.prisma"),
       "--skip-generate",
     ],
-    ROOT
+    ROOT,
+    direct ? { DATABASE_URL: direct } : {}
   );
 } else {
   console.warn(
@@ -165,6 +215,7 @@ const SECRET_KEYS = [
   "SIG_KEY",
   "SIG_SALT",
   "DATABASE_URL",
+  "DIRECT_URL",
   "OPEN_AI_KEY",
   "ANTHROPIC_API_KEY",
   "GEMINI_API_KEY",
