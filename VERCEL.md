@@ -1,7 +1,7 @@
 # Deploying this application to Vercel
 
 **Deployed.** One Vercel project, building from this branch, serving the
-application. It needs two values to be a product a customer can pay for, and
+application. It needs one value to be a product a customer can pay for, and
 refuses to pretend otherwise until it has them.
 
 | | |
@@ -11,15 +11,19 @@ refuses to pretend otherwise until it has them.
 | URL | https://business-ai-operations-platform-22500107zcs-projects.vercel.app |
 | Source | `22500107Zc/LLM`, branch `claude/commercial-b2b-ai-platform-0skp39` |
 
-## 1. The two values it still needs
+## 1. The one value it still needs
 
 Both go in the project's environment variables. Nothing else is required, and
 no code change is involved.
 
 | Variable | What to put there |
 | --- | --- |
-| `DATABASE_URL` | A Postgres connection string. Neon, Supabase and Vercel's own marketplace all have a free tier. The build creates the schema itself with `prisma db push`. |
-| `OPEN_AI_KEY` | A model provider key. Any provider the product supports works; the variable name changes with it (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, and so on, with `LLM_PROVIDER` set to match). |
+| `DATABASE_URL` | The Supabase Postgres connection string — the **pooled** one, on port 6543. `api/index.js` adds `pgbouncer=true` and `connection_limit=1` itself, which is what a serverless function needs against a transaction-mode pooler. The build creates the schema with `prisma db push`. |
+
+**No AI provider key is needed.** This product owns no model credential: each
+customer connects the AI service they chose, with their own key, billed to
+their own account. `AI_CREDENTIAL_KEY` (already set) is what seals those
+credentials at rest.
 
 Then redeploy. Open `/founder`, sign in, create a customer, and they can sign
 in at `/` and start a conversation.
@@ -60,11 +64,13 @@ the real Vercel entry point — over a real socket against a real Postgres, with
 every `STRIPE_*` variable deleted from the process:
 
 ```
-COMMERCIAL LOOP: 88 passed, 0 failed, 1 blocked
+COMMERCIAL LOOP: 92 passed, 0 failed, 0 blocked
 ```
 
-The one blocked item is a model provider key, which this machine does not
-have. It is reported as blocked, never as passed.
+Including a full AI turn: the customer saves their own OpenAI-compatible
+connection, the product decrypts their credential server-side and calls their
+service over real HTTP with their key, and the answer streams back and is
+stored against their account.
 
 ## 1c. Seven real problems the deployment surfaced
 

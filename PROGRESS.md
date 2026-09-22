@@ -20,7 +20,7 @@ configurable subscription fee (currently $3,888.88/month via
 | | |
 | --- | --- |
 | Backend | Node / Express (`server/`), commercial code isolated in `server/business/` |
-| Database | SQLite via Prisma locally; **Postgres on Vercel** — `scripts/prisma-provider.cjs` switches the datasource. |
+| Database | SQLite via Prisma locally; **Supabase Postgres on Vercel** — `scripts/prisma-provider.cjs` switches the datasource. |
 | Frontend | React + Vite (`frontend/`) |
 | Collector | Separate Node service for document parsing (`collector/`) |
 | Money | **Integer cents everywhere.** No floats, no Decimal library needed. |
@@ -70,7 +70,7 @@ or websites. See "Founder control plane" below.
 - **Founder control plane** — `server/business/founder/`, `/founder` in the
   frontend, documented in `DEPLOYMENT.md` §2a. See below.
 - **The whole commercial loop, proved on Postgres through the real Vercel
-  entry point** — `scripts/production-loop-verification.cjs`. 88 checks, 0
+  entry point** — `scripts/production-loop-verification.cjs`. 92 checks, 0
   failures, 1 honestly blocked. See "Proof, not assertion" below.
 - **A customer lands somewhere usable** — creating an account provisions that
   business its first workspace. Customers are `default` role and cannot create
@@ -116,7 +116,7 @@ point, not a test harness — over a real socket.
 
 ```
 DATABASE_URL=postgresql://… node scripts/production-loop-verification.cjs
-COMMERCIAL LOOP: 88 passed, 0 failed, 1 blocked
+COMMERCIAL LOOP: 92 passed, 0 failed, 0 blocked
 ```
 
 Among the 70: a founder creates a customer; the customer signs in and lands in
@@ -144,9 +144,9 @@ Two AI sections, deliberately separate:
 ## Test status
 
 ```
-npx jest                       1534 passed, 3 failed (ffmpeg), 1537 total
-npx jest __tests__/business     442 passed, 442 total   (run from server/)
-node scripts/production-loop-verification.cjs   88 passed, 0 failed, 1 blocked
+npx jest                       1552 passed, 3 failed (ffmpeg), 1555 total
+npx jest __tests__/business     460 passed, 460 total   (run from server/)
+node scripts/production-loop-verification.cjs   92 passed, 0 failed, 0 blocked
 ./scripts/final-verification.sh 19 passed, 1 failed, 3 blocked
 ./scripts/operator-backup-test.sh   18 passed, 0 failed
 ```
@@ -333,31 +333,56 @@ customers, and survival across a cold start - creating only throwaway accounts
 and removing them afterwards, including after a failure. It reports BLOCKED
 rather than failed for anything the deployment cannot do yet.
 
-## The model provider
+## AI: every customer brings their own
 
-`api/index.js` points the existing `generic-openai` provider at Vercel's AI
-Gateway using the deployment's own OIDC identity, so no third-party account or
-separate key is needed. OIDC is enabled on the project. **It does not work
-yet**: `VERCEL_OIDC_TOKEN` is not present in the function's runtime
-environment on this plan, which the founder's model check reports. Setting any
-provider key overrides the whole mechanism and takes effect immediately.
+**There is no platform model credential, and no founder pays for anyone's
+inference.** Each business connects the AI service they chose, with their own
+key, billed to their own account.
+
+| Piece | Where |
+| --- | --- |
+| Sealed credentials (AES-256-GCM) | `server/business/ai/secrets.js` |
+| Provider registry | `server/business/ai/adapters.js` |
+| Customer's connection | `server/business/ai/connection.js` |
+| API | `server/business/routes/aiConnection.js` → `/api/business/ai-connection` |
+| UI | `frontend/src/pages/Business/AIConnection/` → `/ai-connection` |
+| Table | `business_ai_connections`, one row per customer |
+
+Six services to start with, including a generic OpenAI-compatible endpoint for
+the many independent model services that speak that protocol. Adding another
+is one entry in `adapters.js`; nothing else changes.
+
+**Why the adapters are safe to share.** AnythingLLM's provider classes read
+`process.env` in their constructors. `adapters.build()` substitutes the
+variables, constructs, and restores them inside ONE synchronous block — Node
+cannot interleave another request inside a synchronous block, so no request
+can observe another customer's credential, and the key ends up only on the
+returned instance. A test fails if any provider constructor ever stops being
+synchronous, because that is the assumption this rests on.
+
+**AI is not authentication.** A customer with no connection signs in, lands in
+their workspace, and is told "Connect your AI service to start chatting" —
+never a 500 about a missing key. Resolution is by authenticated identity only,
+never an id from a request body.
+
+**The key.** `AI_CREDENTIAL_KEY` seals customer credentials; it is set on the
+Vercel project. Rotating it makes every stored customer credential unreadable
+and each customer would have to enter theirs again.
 
 ## Next action
 
-In the Vercel project's environment variables, set four values and redeploy:
+One value, in the Vercel project's environment variables:
 
-| Variable | Why |
+| Variable | What |
 | --- | --- |
-| `DATABASE_URL` | A Postgres connection string. The build creates the schema itself. |
-| `OPEN_AI_KEY` | Or another provider's key, with `LLM_PROVIDER` set to match. |
+| `DATABASE_URL` | The Supabase Postgres connection string. Use the **pooled** one (port 6543) — the serverless entry adds `pgbouncer=true` and `connection_limit=1` itself. The build creates the schema with `prisma db push`. |
 
-`FOUNDER_PASSWORD_HASH`, `JWT_SECRET`, `SIG_KEY` and `SIG_SALT` have all been
-rotated already and need nothing. The founder password was replaced after the
-old hash was served in the bundle; it was handed over once, in chat, and
-exists here only as a hash.
+Everything else is set: `FOUNDER_PASSWORD_HASH`, `JWT_SECRET`, `SIG_KEY`,
+`SIG_SALT` and `AI_CREDENTIAL_KEY` are all in place and rotated. No AI provider
+key is needed — customers supply their own.
 
-Then run, with the founder password in the environment and never on the
-command line:
+Then, with the founder password in the environment and never on the command
+line:
 
 ```
 FOUNDER_PASSWORD=... node scripts/production-acceptance.cjs
