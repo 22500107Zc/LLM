@@ -38,11 +38,26 @@ for. It is infrastructure tooling, not the commercial account model.
 
 ## 2. Prerequisites
 
+Two ways to run this. They are the same application and the same founder /
+customer model; only the runtime differs.
+
+### Hosted (Vercel) — see `VERCEL.md`
+
+Already deployed. Needs two environment variables and nothing else:
+`DATABASE_URL` (Postgres) and a model provider key. Document upload and agent
+automations do not work there and say so plainly; everything else does.
+
+### Self-hosted (Docker) — the rest of this guide
+
 - A Linux host with Docker Engine and the Compose plugin
-- A DNS record for the customer subdomain pointing at the host
+- A DNS record for the subdomain pointing at the host
 - A reverse proxy terminating TLS (Caddy or nginx)
-- The customer's AI provider API key
+- An AI provider API key
 - Stripe account with the commercial product configured (see §7)
+
+Nothing is missing here: SQLite or Postgres, LanceDB, native embeddings, the
+collector and agent automations all work, because the filesystem stays and the
+process is long-running.
 
 ---
 
