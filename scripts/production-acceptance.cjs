@@ -30,6 +30,21 @@ if (!FOUNDER_PASSWORD) {
   process.exit(2);
 }
 
+/**
+ * Optionally, a throwaway AI credential to prove a full customer AI turn.
+ * The product never owns one - this stands in for what a customer supplies.
+ *
+ *   CUSTOMER_AI='{"provider":"openai-compatible","baseUrl":"…","model":"…","apiKey":"…"}'
+ */
+let CUSTOMER_AI = null;
+try {
+  CUSTOMER_AI = process.env.CUSTOMER_AI
+    ? JSON.parse(process.env.CUSTOMER_AI)
+    : null;
+} catch {
+  console.error("CUSTOMER_AI is not valid JSON; skipping the AI turn.");
+}
+
 const RUN = crypto.randomBytes(4).toString("hex");
 const password = (label) =>
   `${label}-${crypto.randomBytes(9).toString("base64url")}-A1!`;
@@ -213,21 +228,26 @@ async function cleanup() {
     !/\$2[aby]\$/.test(JSON.stringify(session.payload))
   );
 
-  // ------------------------------------------------------------------ AI --
-  section("A real model answers");
-  const model = await api.get("/api/founder/model-check");
-  if (model.payload?.ok) {
-    check(
-      `a real model answered (${model.payload.provider} / ${model.payload.model})`,
-      String(model.payload.sample ?? "").trim().length > 0,
-      model.payload.sample
-    );
-  } else {
-    blocked(
-      "a real model answers",
-      model.payload?.reason ?? `model check returned ${model.status}`
-    );
-  }
+  // ----------------------------------------------------------- platform --
+  section("Platform readiness");
+  const ready = await api.get("/api/founder/readiness");
+  check(
+    "the founder can see what the platform still needs",
+    ready.status === 200 && Boolean(ready.payload?.platform)
+  );
+  check(
+    "customers' AI keys can be stored securely",
+    ready.payload?.platform?.credentialEncryption === "ready",
+    String(ready.payload?.platform?.credentialEncryption)
+  );
+  const hasDatabase = ready.payload?.platform?.database === "postgres";
+  if (!hasDatabase)
+    blocked("durable customer storage", "no Postgres DATABASE_URL yet");
+  check(
+    "several AI services are offered to customers",
+    (ready.payload?.aiServices ?? []).length > 1,
+    (ready.payload?.aiServices ?? []).join(", ")
+  );
 
   // ------------------------------------------------------------ customers --
   section("Founder creates a customer");
@@ -294,36 +314,87 @@ async function cleanup() {
     ).status === 401
   );
 
-  // ----------------------------------------------------------- AI in situ --
-  section("The customer performs an AI workflow");
+  // -------------------------------------------- the customer's own AI --
+  //
+  // This product has no model credential. The customer connects the service
+  // they chose; until they do, everything else must still work.
+  section("The customer's own AI connection");
   const slug = acmeSpaces[0]?.slug;
-  if (!slug) {
-    check("the customer has a workspace to work in", false);
-  } else {
-    const answer = await chat(
-      acmeToken,
-      slug,
-      "In one sentence, what is a purchase order?"
-    );
-    if (answer.error) {
-      blocked("an authenticated customer completes an AI turn", answer.error);
-    } else {
-      check(
-        "the assistant answered the customer",
-        answer.text.trim().length > 20,
-        answer.text.slice(0, 120)
-      );
 
+  const options = await asCustomer(
+    acmeToken,
+    "/api/business/ai-connection/options"
+  );
+  check(
+    "the customer is offered AI services to connect",
+    options.status === 200 && (options.payload?.options ?? []).length > 1
+  );
+
+  const beforeConnecting = await asCustomer(
+    acmeToken,
+    "/api/business/ai-connection"
+  );
+  check(
+    "they start with none, and that is not an error",
+    beforeConnecting.status === 200 &&
+      beforeConnecting.payload?.connection === null
+  );
+
+  if (slug) {
+    const unconnected = await chat(acmeToken, slug, "Hello");
+    check(
+      "chatting without one tells them what to do, not that we broke",
+      /connect your ai service/i.test(unconnected.error ?? ""),
+      unconnected.error ?? "no message"
+    );
+  }
+
+  if (CUSTOMER_AI) {
+    const saved = await call("POST", "/api/business/ai-connection", {
+      body: CUSTOMER_AI,
+      headers: { Authorization: `Bearer ${acmeToken}` },
+    });
+    check("the customer saves their own connection", saved.status === 200);
+    check(
+      "their key never comes back",
+      !JSON.stringify(saved.payload).includes(CUSTOMER_AI.apiKey ?? "\u0000")
+    );
+
+    const tested = await call("POST", "/api/business/ai-connection/test", {
+      body: {},
+      headers: { Authorization: `Bearer ${acmeToken}` },
+    });
+    check(
+      "their own service answers",
+      tested.payload?.ok === true,
+      tested.payload?.reason ?? ""
+    );
+
+    if (slug) {
+      const answer = await chat(
+        acmeToken,
+        slug,
+        "In one sentence, what is a purchase order?"
+      );
+      check(
+        "the assistant answers through THEIR connection",
+        !answer.error && answer.text.trim().length > 20,
+        answer.error ?? answer.text.slice(0, 100)
+      );
       const history = await asCustomer(
         acmeToken,
         `/api/workspace/${slug}/chats`
       );
       check(
         "the conversation persisted",
-        (history.payload?.history ?? []).length > 0,
-        `${(history.payload?.history ?? []).length} messages`
+        (history.payload?.history ?? []).length > 0
       );
     }
+  } else {
+    blocked(
+      "an end-to-end AI turn",
+      "no temporary customer AI credential was supplied to this run"
+    );
   }
 
   // ---------------------------------------------------------- disable etc --

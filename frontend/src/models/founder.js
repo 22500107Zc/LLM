@@ -162,9 +162,10 @@ const Founder = {
       : { success: false, error: payload?.error ?? GENERIC_ERROR };
   },
 
-  /** Is there a database and a model behind this deployment? Founder only. */
+  /** Is the platform ready to sell? Founder only. Says nothing about any
+   * customer's AI service - that is theirs to connect, not ours to supply. */
   status: async function () {
-    const { ok, payload } = await request("/model-check");
+    const { ok, payload } = await request("/readiness");
     return ok ? payload : null;
   },
 

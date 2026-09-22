@@ -517,31 +517,33 @@ function Fact({ label, value }) {
 // ------------------------------------------------------------------ list ---
 
 /**
- * What this deployment can and cannot do right now.
+ * What the PLATFORM still needs.
  *
- * Founder-only, and it exists so the answer to "is this ready to sell?" is on
- * the screen rather than in a log. It shows nothing at all once both parts are
- * working - a green panel on every visit is just noise.
+ * Founder-only, and deliberately silent about AI. This product has no model
+ * credential of its own — each customer connects the service they chose and
+ * pays for their own usage — so a customer who has not connected one yet is
+ * mid-onboarding, not a platform fault. Saying otherwise here would invent a
+ * blocker that does not exist.
+ *
+ * It shows nothing once the platform is ready. A panel that is always there
+ * is a panel nobody reads.
  */
 function Readiness({ status }) {
-  if (!status) return null;
+  if (!status?.platform) return null;
 
-  const database = status.database === "postgres";
-  const model = status.ok === true;
-  if (database && model) return null;
+  const { database, credentialEncryption, ready } = status.platform;
+  if (ready) return null;
 
   const rows = [
     {
-      ok: database,
+      ok: database === "postgres",
       label: "Customer accounts",
-      good: "Stored in Postgres.",
-      bad: "No database yet, so accounts cannot be created. Add a Postgres DATABASE_URL to this deployment.",
+      bad: "No database yet, so accounts cannot be created. Add a Supabase Postgres DATABASE_URL to this deployment.",
     },
     {
-      ok: model,
-      label: "AI assistant",
-      good: `Answering through ${status.provider}${status.model ? ` (${status.model})` : ""}.`,
-      bad: "No model provider yet, so customers cannot chat. Add a provider key to this deployment.",
+      ok: credentialEncryption === "ready",
+      label: "Credential storage",
+      bad: "Customers' AI keys cannot be stored securely yet. Set AI_CREDENTIAL_KEY on this deployment.",
     },
   ];
 
@@ -553,13 +555,13 @@ function Readiness({ status }) {
       <ul className="space-y-2">
         {rows.map((row) => (
           <li key={row.label} className="flex gap-3 text-sm">
-            <span aria-hidden="true">{row.ok ? "✓" : "•"}</span>
+            <span aria-hidden="true">{row.ok ? "\u2713" : "\u2022"}</span>
             <span>
               <span className="font-medium text-theme-text-primary">
                 {row.label}:{" "}
               </span>
               <span className="text-theme-text-secondary">
-                {row.ok ? row.good : row.bad}
+                {row.ok ? "Ready." : row.bad}
               </span>
             </span>
           </li>

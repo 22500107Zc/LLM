@@ -237,6 +237,19 @@ const Business = {
     deliveries: (uuid) => request(`/integrations/${uuid}/deliveries`),
   },
 
+  // --- the customer's own AI connection ------------------------------------
+  //
+  // This product has no model credential of its own. Each business connects
+  // the AI service they chose and pays for their own usage. The key is sent
+  // once and never comes back - omit it to change a model without retyping it.
+  aiConnection: {
+    options: () => request("/ai-connection/options"),
+    get: () => request("/ai-connection"),
+    save: (body) => request("/ai-connection", { method: "POST", body }),
+    remove: () => request("/ai-connection", { method: "DELETE" }),
+    test: () => request("/ai-connection/test", { method: "POST", body: {} }),
+  },
+
   // --- value evidence ------------------------------------------------------
   value: {
     summary: (period) =>

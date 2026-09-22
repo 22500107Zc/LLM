@@ -319,6 +319,13 @@ const SidebarOptions = ({ user = null, t }) => (
           roles={["admin"]}
         />
         <Option
+          btnText="AI Connection"
+          icon={<PlugsConnected className="h-5 w-5 flex-shrink-0" />}
+          href={paths.business.aiConnection()}
+          user={user}
+          roles={["admin", "manager", "default"]}
+        />
+        <Option
           btnText="Integrations"
           icon={<PlugsConnected className="h-5 w-5 flex-shrink-0" />}
           href={paths.business.integrations()}

@@ -97,6 +97,7 @@ const paths = {
     quality: () => "/ai-quality",
     team: () => "/team",
     integrations: () => "/integrations",
+    aiConnection: () => "/ai-connection",
     auditLog: () => "/audit-log",
     billing: () => "/settings/billing",
   },

@@ -379,7 +379,9 @@ async function resolveLLMConnector({
       thread,
       attachments,
     });
-    return { ...result, error: null };
+    // `error` here is not a crash: it is something the customer can act on,
+    // such as not having connected their AI service yet. Keep it.
+    return { ...result, error: result.error ?? null };
   } catch (routerError) {
     return {
       connector: null,

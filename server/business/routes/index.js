@@ -11,6 +11,7 @@ const { platformRoutes } = require("./platform");
 const { publicCaptureRoutes } = require("./publicCapture");
 const { knowledgeRoutes } = require("./knowledge");
 const { valueRoutes } = require("./value");
+const { aiConnectionRoutes } = require("./aiConnection");
 
 /**
  * Mounts the commercial business API.
@@ -38,6 +39,7 @@ function businessEndpoints(app) {
   teamRoutes(businessRouter);
   integrationRoutes(businessRouter);
   valueRoutes(businessRouter);
+  aiConnectionRoutes(businessRouter);
 
   // ---- Unauthenticated platform surface ----------------------------------
   const publicRouter = express.Router();
@@ -92,6 +94,8 @@ const AI_ENDPOINTS = Object.freeze({
     "/v1/workspace/:slug/thread/:threadSlug/chat",
     "/v1/workspace/:slug/thread/:threadSlug/stream-chat",
     "/v1/openai/chat/completions",
+    // The customer testing their OWN connection with their OWN credential.
+    "/business/ai-connection/test",
   ]),
   public: Object.freeze(["/embed/:embedId/stream-chat"]),
 });

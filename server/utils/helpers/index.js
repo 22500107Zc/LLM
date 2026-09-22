@@ -678,7 +678,42 @@ async function resolveProviderConnector({
   messageCountOverride = null,
   apiSessionId = null,
 }) {
+  // The customer's own connection comes first.
+  //
+  // This product has no platform-wide model credential: every business brings
+  // the AI service they chose and pays for their own usage. `user` here is the
+  // authenticated user the caller resolved - never an id from a request body.
+  const { connection } = require("../../business/ai");
+  try {
+    const customerConnector = await connection.connectorFor(user);
+    if (customerConnector)
+      return {
+        connector: customerConnector,
+        routingMetadata: null,
+        prefetchedContext: null,
+      };
+  } catch (error) {
+    return {
+      connector: null,
+      routingMetadata: null,
+      prefetchedContext: null,
+      error: error.message,
+    };
+  }
+
   const effectiveProvider = workspace?.chatProvider || process.env.LLM_PROVIDER;
+
+  // No connection of their own, and no provider configured on the deployment
+  // either. That is configuration they can complete themselves, so say so
+  // rather than failing.
+  if (!effectiveProvider)
+    return {
+      connector: null,
+      routingMetadata: null,
+      prefetchedContext: null,
+      error:
+        "Connect your AI service to start chatting. Open AI Connection in settings and add the service you use.",
+    };
 
   if (effectiveProvider !== "anythingllm-router") {
     return {

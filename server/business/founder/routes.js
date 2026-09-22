@@ -365,91 +365,52 @@ function founderRoutes(app) {
     })
   );
 
-  // --------------------------------------------------------- model check --
+  // ----------------------------------------------------------- readiness --
   /**
-   * Is there actually a model behind this deployment?
+   * Is the PLATFORM ready to sell?
    *
-   * The founder needs to know this before they sell anything, and "the chat
-   * box seems to work" is not an answer they can get before a customer
-   * exists. This makes one real completion call through whatever provider the
-   * deployment is configured with and reports what came back.
+   * Deliberately says nothing about whether any AI service is connected. This
+   * product has no model credential of its own: each customer connects the
+   * service they chose and pays for their own usage, so a customer who has not
+   * done that yet is a customer mid-onboarding, not a broken platform.
    *
-   * Founder-only, and it names the provider and model but never the
-   * credential. It deliberately does not touch the database, so it answers
-   * even on a deployment that has no customers yet.
+   * Founder-only. Reports state, never a credential.
    */
   router.get(
-    "/model-check",
+    "/readiness",
     [auth.requireFounder],
     safeHandler(async (_request, response) => {
-      const provider = process.env.LLM_PROVIDER || "openai";
-
-      // Names only, never values. If there is no model, the founder's first
-      // question is "why", and the answer is almost always which of these is
-      // missing from the deployment.
-      //
-      // DATABASE_URL is deliberately not in this list. The application gives
-      // itself a local SQLite fallback when none is set, so its mere presence
-      // means nothing - reporting it as configured would say the deployment
-      // has a database when it has a file that disappears.
-      const configured = [
-        "VERCEL_OIDC_TOKEN",
-        "LLM_PROVIDER",
-        "GENERIC_OPEN_AI_BASE_PATH",
-        "GENERIC_OPEN_AI_MODEL_PREF",
-        "GENERIC_OPEN_AI_API_KEY",
-        "OPEN_AI_KEY",
-        "ANTHROPIC_API_KEY",
-      ].filter((key) => String(process.env[key] ?? "").trim().length > 0);
-
       const url = String(process.env.DATABASE_URL ?? "").trim();
       const database =
         !url || url.startsWith("file:") || url.endsWith(".db")
-          ? "not configured - customer accounts cannot be stored"
+          ? "not configured"
           : "postgres";
-      const model =
-        process.env.GENERIC_OPEN_AI_MODEL_PREF ||
-        process.env.OPEN_MODEL_PREF ||
-        null;
 
-      try {
-        const { getLLMProvider } = require("../../utils/helpers");
-        const connector = getLLMProvider({});
-        const answer = await connector.getChatCompletion(
-          [
-            {
-              role: "user",
-              content:
-                "Reply with exactly: the assistant is reachable. Nothing else.",
-            },
-          ],
-          { temperature: 0 }
-        );
+      const { secrets, adapters } = require("../ai");
 
-        const text = String(
-          answer?.textResponse ?? answer?.content ?? answer ?? ""
-        ).trim();
-
-        return response.status(200).json({
-          ok: text.length > 0,
-          provider,
-          model,
-          configured,
-          database,
-          sample: text.slice(0, 200),
-        });
-      } catch (error) {
-        console.error("[founder] model check failed:", error.message);
-        return response.status(200).json({
-          ok: false,
-          provider,
-          model,
-          configured,
-          database,
-          // The founder is the one person who should see the real reason.
-          reason: String(error.message ?? error).slice(0, 300),
-        });
+      let customers = null;
+      let withAi = null;
+      if (database === "postgres") {
+        try {
+          const prisma = require("../../utils/prisma");
+          customers = await prisma.business_customers.count();
+          withAi = await prisma.business_ai_connections.count();
+        } catch (error) {
+          console.error("[founder] readiness count failed:", error.message);
+        }
       }
+
+      return response.status(200).json({
+        platform: {
+          database,
+          credentialEncryption: secrets.available()
+            ? "ready"
+            : "not configured",
+          ready: database === "postgres" && secrets.available(),
+        },
+        customers: { total: customers, withAiConnection: withAi },
+        aiServices: adapters.types(),
+      });
     })
   );
 

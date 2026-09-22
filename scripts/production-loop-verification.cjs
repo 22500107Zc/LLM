@@ -239,7 +239,11 @@ async function openAiCompatibleEndpoint(answerText) {
     let body = "";
     request.on("data", (part) => (body += part));
     request.on("end", () => {
-      received.push({ url: request.url, body: safeParse(body) });
+      received.push({
+        url: request.url,
+        body: safeParse(body),
+        authorization: request.headers.authorization ?? null,
+      });
 
       if (!request.url.includes("/chat/completions")) {
         response.writeHead(404).end("{}");
@@ -477,121 +481,132 @@ function modelProviderConfigured() {
     firstLook.map((workspace) => workspace.name).join(", ") || "none"
   );
 
-  // ------------------------------------------------------------ AI workflow
+  // ------------------------------------------ the customer's own AI --
   //
-  // The product is sold as an AI assistant, so this is the check that decides
-  // whether it is sellable. It drives the real chat endpoint over a real
-  // socket as the authenticated customer. There is no stub behind it: with a
-  // provider key it must come back with an actual answer, and without one it
-  // must fail in a way a customer can read.
-  section("AI workflow");
+  // This product owns no model credential. A customer who has not connected
+  // their AI service yet must still have a working account - and must be told
+  // what to do, not shown a platform failure.
+  section("The customer's own AI connection");
   const workspaceSlug = firstLook[0]?.slug;
-  const answer = workspaceSlug
-    ? await chat(
-        token,
-        workspaceSlug,
-        "In one sentence, what is a purchase order?"
-      )
+
+  const aiOptions = await useProduct(
+    token,
+    "/api/business/ai-connection/options"
+  );
+  check(
+    "the customer is offered AI services to connect",
+    aiOptions.status === 200 && (aiOptions.payload?.options ?? []).length > 1,
+    (aiOptions.payload?.options ?? []).map((o) => o.type).join(", ")
+  );
+  check(
+    "an OpenAI-compatible endpoint is one of them",
+    (aiOptions.payload?.options ?? []).some(
+      (o) => o.type === "openai-compatible"
+    )
+  );
+
+  const noConnectionYet = await useProduct(
+    token,
+    "/api/business/ai-connection"
+  );
+  check(
+    "they start with none, and that is not an error",
+    noConnectionYet.status === 200 &&
+      noConnectionYet.payload?.connection === null
+  );
+
+  const beforeConnecting = workspaceSlug
+    ? await chat(token, workspaceSlug, "Hello")
     : null;
+  check(
+    "chatting without one tells them what to do",
+    /connect your ai service/i.test(beforeConnecting?.error ?? ""),
+    beforeConnecting?.error ?? "no message"
+  );
+  check(
+    "and says nothing about our infrastructure",
+    !/api key|module|env|provider key|openai/i.test(
+      beforeConnecting?.error ?? ""
+    ),
+    beforeConnecting?.error ?? ""
+  );
 
-  if (!workspaceSlug) {
-    check("customer has a workspace to chat in", false, "no workspace");
-  } else if (modelProviderConfigured()) {
-    check(
-      "the chat endpoint accepts the customer's message",
-      answer.status === 200
-    );
-    check("the assistant answered", !answer.error, answer.error ?? "");
-    check(
-      "the answer is real text, not an empty stream",
-      answer.text.trim().length > 20,
-      `${answer.text.trim().length} characters`
-    );
-    check(
-      "the turn was written to the customer's chat history",
-      (await prisma.workspace_chats.count({
-        where: { workspaceId: firstLook[0].id },
-      })) > 0
-    );
-  } else {
-    blocked(
-      "an authenticated customer completes an AI turn",
-      "no model provider key in this environment"
-    );
-    // What the product does with no provider is still ours to get right.
-    check(
-      "the chat endpoint is reachable by an ordinary customer",
-      answer.status === 200,
-      `got ${answer.status}`
-    );
-    check(
-      "a provider failure is reported to the customer, not swallowed",
-      Boolean(answer.error)
-    );
-    check(
-      "the customer is told this in plain language",
-      /not available right now|please try again|contact support/i.test(
-        answer.error ?? ""
-      ),
-      answer.error ?? "no error text"
-    );
-    check(
-      "no infrastructure detail leaks into what the customer sees",
-      !/api key|apikey|module|lancedb|prisma|postgres|vercel|stack|node_modules|\.js:/i.test(
-        answer.error ?? ""
-      ),
-      answer.error ?? ""
-    );
-  }
-
-  // ------------------------------------- AI pipeline, against a real endpoint
+  // ------------------------- the customer's AI, against a real endpoint --
   //
-  // The section above cannot finish without a paid provider. This one proves
-  // everything up to the model itself: the product makes a genuine HTTP call
-  // to an OpenAI-compatible endpoint and streams the reply back to the
-  // customer. Read openAiCompatibleEndpoint's comment for what that is and is
-  // not evidence of.
-  section("AI pipeline, against a real OpenAI-compatible endpoint");
+  // The customer saves the connection; the product resolves it from their
+  // authenticated identity, decrypts their credential server-side, and calls
+  // THEIR service. The endpoint below is a real OpenAI-compatible HTTP server
+  // on localhost - nothing in the product is mocked. See
+  // openAiCompatibleEndpoint for what that proves and what it does not.
+  section("The customer's AI connection, end to end");
   const ANSWER =
     "A purchase order is a buyer's written commitment to buy specified goods at an agreed price.";
   const endpoint = await openAiCompatibleEndpoint(ANSWER);
-  const restore = { ...process.env };
-  Object.assign(process.env, {
-    LLM_PROVIDER: "generic-openai",
-    GENERIC_OPEN_AI_BASE_PATH: endpoint.url,
-    GENERIC_OPEN_AI_MODEL_PREF: "verification-model",
-    GENERIC_OPEN_AI_API_KEY: "verification-only-not-a-real-key",
-    GENERIC_OPEN_AI_MODEL_TOKEN_LIMIT: "8192",
+  const CUSTOMER_KEY = `acme-own-key-${crypto.randomBytes(6).toString("hex")}`;
+
+  const savedConnection = await call("POST", "/api/business/ai-connection", {
+    body: {
+      provider: "openai-compatible",
+      baseUrl: endpoint.url,
+      model: "their-model",
+      apiKey: CUSTOMER_KEY,
+    },
+    headers: { Authorization: `Bearer ${token}` },
   });
+  check(
+    "the customer saves their own connection",
+    savedConnection.status === 200
+  );
+  check(
+    "their key never comes back from the API",
+    !JSON.stringify(savedConnection.payload).includes(CUSTOMER_KEY)
+  );
+  check(
+    "the stored credential is encrypted, not the key itself",
+    await (async () => {
+      const row = await prisma.business_ai_connections.findUnique({
+        where: { user_id: acmeUserId },
+      });
+      return Boolean(row?.credential) && !row.credential.includes(CUSTOMER_KEY);
+    })()
+  );
 
   if (!workspaceSlug) {
-    check("customer has a workspace to chat in", false, "no workspace");
+    check("the customer has a workspace to work in", false);
   } else {
     const piped = await chat(
       token,
       workspaceSlug,
       "In one sentence, what is a purchase order?"
     );
-    check("the customer's chat request is accepted", piped.status === 200);
     check("nothing failed in the AI path", !piped.error, piped.error ?? "");
     check(
-      "the product reached the provider over real HTTP",
-      endpoint.received.some((call) => call.url.includes("/chat/completions"))
+      "the product called THEIR service over real HTTP",
+      endpoint.received.some((c) => c.url.includes("/chat/completions"))
+    );
+    check(
+      "using THEIR credential, not the platform's",
+      endpoint.received.some(
+        (c) => c.authorization === `Bearer ${CUSTOMER_KEY}`
+      ),
+      endpoint.received
+        .map((c) => (c.authorization ? "sent" : "none"))
+        .join(",")
     );
 
-    const sent = endpoint.received.find((call) =>
-      call.url.includes("/chat/completions")
+    const sent = endpoint.received.find((c) =>
+      c.url.includes("/chat/completions")
     )?.body;
     check(
-      "the customer's own words were sent to the model",
+      "the customer's own words reached the model",
       JSON.stringify(sent?.messages ?? []).includes("what is a purchase order")
     );
     check(
       "the workspace's system prompt went with it",
-      (sent?.messages ?? []).some((message) => message.role === "system")
+      (sent?.messages ?? []).some((m) => m.role === "system")
     );
     check(
-      "the answer streamed back to the customer intact",
+      "the answer streamed back intact",
       piped.text.includes("written commitment to buy"),
       piped.text.slice(0, 80)
     );
@@ -599,25 +614,13 @@ function modelProviderConfigured() {
     const stored = await prisma.workspace_chats.findMany({
       where: { workspaceId: firstLook[0].id },
     });
-    check(
-      "the turn was written to the customer's chat history",
-      stored.length > 0
-    );
+    check("the turn was written to their chat history", stored.length > 0);
     check(
       "the stored turn belongs to that customer and no one else",
       stored.every((row) => row.user_id === acmeUserId)
     );
   }
 
-  for (const key of [
-    "LLM_PROVIDER",
-    "GENERIC_OPEN_AI_BASE_PATH",
-    "GENERIC_OPEN_AI_MODEL_PREF",
-    "GENERIC_OPEN_AI_API_KEY",
-    "GENERIC_OPEN_AI_MODEL_TOKEN_LIMIT",
-  ])
-    if (restore[key] === undefined) delete process.env[key];
-    else process.env[key] = restore[key];
   await endpoint.close();
 
   // ------------------------------------------- endpoints this build does not host

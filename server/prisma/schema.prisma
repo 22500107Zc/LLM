@@ -92,6 +92,7 @@ model users {
   workspace_parsed_files       workspace_parsed_files[]
   memories                     memories[]
   business_customer            business_customers?
+  business_ai_connection       business_ai_connections?
 }
 
 /// A customer the founder created and authorized.
@@ -120,6 +121,25 @@ model business_customers {
   user          users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([business_name])
+}
+
+// One customer's own connection to the AI service THEY chose and pay for.
+//
+// There is no platform-wide model credential. `credential` holds an
+// AES-256-GCM sealed value (see business/ai/secrets.js) and is never returned
+// by an API - the customer sees whether one is configured, not what it is.
+model business_ai_connections {
+  id              Int      @id @default(autoincrement())
+  user_id         Int      @unique
+  provider        String
+  base_url        String?
+  model           String?
+  embedding_model String?
+  credential      String?
+  settings        String?
+  createdAt       DateTime @default(now())
+  lastUpdatedAt   DateTime @default(now())
+  user            users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
 }
 
 model recovery_codes {
@@ -213,16 +233,16 @@ model workspace_suggested_messages {
 }
 
 model workspace_chats {
-  id             Int      @id @default(autoincrement())
-  workspaceId    Int
-  prompt         String
-  response       String
-  include        Boolean  @default(true)
-  user_id        Int?
-  thread_id      Int? // No relation to prevent whole table migration
-  api_session_id String? // String identifier for only the dev API to partition chats in any mode.
-  createdAt      DateTime @default(now())
-  lastUpdatedAt  DateTime @default(now())
+  id              Int      @id @default(autoincrement())
+  workspaceId     Int
+  prompt          String
+  response        String
+  include         Boolean  @default(true)
+  user_id         Int?
+  thread_id       Int? // No relation to prevent whole table migration
+  api_session_id  String? // String identifier for only the dev API to partition chats in any mode.
+  createdAt       DateTime @default(now())
+  lastUpdatedAt   DateTime @default(now())
   feedbackScore   Boolean?
   memoryProcessed Boolean? @map("memory_processed")
   users           users?   @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
@@ -492,28 +512,28 @@ model model_routers {
 }
 
 model model_router_rules {
-  id               Int           @id @default(autoincrement())
-  router_id        Int
-  enabled          Boolean       @default(true)
-  priority         Int
-  type             String        @default("calculated")
-  title            String
-  description      String?
+  id              Int           @id @default(autoincrement())
+  router_id       Int
+  enabled         Boolean       @default(true)
+  priority        Int
+  type            String        @default("calculated")
+  title           String
+  description     String?
   // For `calculated` rules: the boolean operator joining `conditions` — "AND"
   // (all must match) or "OR" (any must match). Null for `llm` rules.
-  condition_logic  String?
+  condition_logic String?
   // For `calculated` rules: JSON-stringified array of condition objects, each
   // shaped as { property: string, comparator: string, value: string } where
   // `property` ∈ VALID_PROPERTIES and `comparator` ∈ VALID_COMPARATORS (see
   // server/models/modelRouterRule.js). `value` is always stored as a string;
   // numeric comparators parse it at evaluation time. Null for `llm` rules.
-  conditions       String?
-  route_provider   String
-  route_model      String
-  created_by       Int?
-  createdAt        DateTime      @default(now())
-  lastUpdatedAt    DateTime      @default(now())
-  router           model_routers @relation(fields: [router_id], references: [id], onDelete: Cascade)
+  conditions      String?
+  route_provider  String
+  route_model     String
+  created_by      Int?
+  createdAt       DateTime      @default(now())
+  lastUpdatedAt   DateTime      @default(now())
+  router          model_routers @relation(fields: [router_id], references: [id], onDelete: Cascade)
 
   @@unique([router_id, title])
   @@index([router_id])
@@ -574,16 +594,16 @@ model billing_events {
 /// Business-level audit trail. Deliberately separate from upstream `event_logs`
 /// so retention, schema and access control can be managed commercially.
 model audit_logs {
-  id           Int      @id @default(autoincrement())
-  action       String
-  category     String   @default("general")
-  actor_id     Int?
-  actor_label  String?
-  resource     String?
-  resource_id  String?
-  metadata     String?
-  ip_address   String?
-  occurredAt   DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  action      String
+  category    String   @default("general")
+  actor_id    Int?
+  actor_label String?
+  resource    String?
+  resource_id String?
+  metadata    String?
+  ip_address  String?
+  occurredAt  DateTime @default(now())
 
   @@index([action])
   @@index([category])
@@ -602,23 +622,23 @@ model platform_user_profiles {
 
 /// A business-facing "AI Agent". Thin productization layer over a workspace.
 model agent_profiles {
-  id                    Int      @id @default(autoincrement())
-  uuid                  String   @unique
-  name                  String
-  description           String?
-  avatar_url            String?
-  template              String?
-  workspace_id          Int
-  active                Boolean  @default(true)
-  visibility            String   @default("private")
-  fallback_message      String?
-  lead_capture_enabled  Boolean  @default(false)
-  lead_capture_fields   String?
-  escalation_enabled    Boolean  @default(false)
-  escalation_target     String?
-  createdBy             Int?
-  createdAt             DateTime @default(now())
-  lastUpdatedAt         DateTime @default(now())
+  id                   Int      @id @default(autoincrement())
+  uuid                 String   @unique
+  name                 String
+  description          String?
+  avatar_url           String?
+  template             String?
+  workspace_id         Int
+  active               Boolean  @default(true)
+  visibility           String   @default("private")
+  fallback_message     String?
+  lead_capture_enabled Boolean  @default(false)
+  lead_capture_fields  String?
+  escalation_enabled   Boolean  @default(false)
+  escalation_target    String?
+  createdBy            Int?
+  createdAt            DateTime @default(now())
+  lastUpdatedAt        DateTime @default(now())
 
   @@index([workspace_id])
 }
@@ -652,8 +672,8 @@ model leads {
 
 /// A request to hand a conversation to a human.
 model escalations {
-  id               Int      @id @default(autoincrement())
-  uuid             String   @unique
+  id               Int       @id @default(autoincrement())
+  uuid             String    @unique
   contact_name     String?
   contact_email    String?
   contact_phone    String?
@@ -664,13 +684,13 @@ model escalations {
   embed_id         Int?
   session_id       String?
   source_url       String?
-  reason           String   @default("requested")
-  status           String   @default("open")
-  delivered        Boolean  @default(false)
+  reason           String    @default("requested")
+  status           String    @default("open")
+  delivered        Boolean   @default(false)
   delivery_error   String?
   resolved_at      DateTime?
-  createdAt        DateTime @default(now())
-  lastUpdatedAt    DateTime @default(now())
+  createdAt        DateTime  @default(now())
+  lastUpdatedAt    DateTime  @default(now())
 
   @@index([status])
   @@index([createdAt])
@@ -761,31 +781,31 @@ model quality_runs {
 
 /// The result of one test within one run.
 model quality_results {
-  id          Int      @id @default(autoincrement())
-  run_id      Int
-  test_id     Int
-  verdict     String
-  score       Float?
-  answer      String?
-  sources     String?
-  detail      String?
-  createdAt   DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  run_id    Int
+  test_id   Int
+  verdict   String
+  score     Float?
+  answer    String?
+  sources   String?
+  detail    String?
+  createdAt DateTime @default(now())
 
   @@index([run_id])
 }
 
 /// Review state for a conversation (internal workspace chat or public embed chat).
 model conversation_reviews {
-  id              Int       @id @default(autoincrement())
-  channel         String
-  reference_id    String
-  reviewed        Boolean   @default(false)
-  reviewed_by     Int?
-  reviewed_at     DateTime?
-  summary         String?
-  note            String?
-  createdAt       DateTime  @default(now())
-  lastUpdatedAt   DateTime  @default(now())
+  id            Int       @id @default(autoincrement())
+  channel       String
+  reference_id  String
+  reviewed      Boolean   @default(false)
+  reviewed_by   Int?
+  reviewed_at   DateTime?
+  summary       String?
+  note          String?
+  createdAt     DateTime  @default(now())
+  lastUpdatedAt DateTime  @default(now())
 
   @@unique([channel, reference_id])
 }
@@ -804,15 +824,15 @@ model platform_settings {
 /// session it can find here, which stops an unrelated event from the same
 /// Stripe account becoming the first binding.
 model billing_pending_checkouts {
-  id                 Int       @id @default(autoincrement())
-  session_id         String    @unique
-  deployment_id      String
-  expected_customer  String?
-  price_id           String?
-  status             String    @default("pending")
-  createdAt          DateTime  @default(now())
-  consumedAt         DateTime?
-  expiresAt          DateTime
+  id                Int       @id @default(autoincrement())
+  session_id        String    @unique
+  deployment_id     String
+  expected_customer String?
+  price_id          String?
+  status            String    @default("pending")
+  createdAt         DateTime  @default(now())
+  consumedAt        DateTime?
+  expiresAt         DateTime
 
   @@index([deployment_id])
 }
@@ -823,36 +843,36 @@ model billing_pending_checkouts {
 /// a human has verified it against evidence. A captured lead is NOT revenue
 /// and can never be recorded as one.
 model value_records {
-  id                Int       @id @default(autoincrement())
-  uuid              String    @unique
-  category          String
+  id                   Int       @id @default(autoincrement())
+  uuid                 String    @unique
+  category             String
   /// realized_gross_profit | avoided_cost
-  kind              String
+  kind                 String
   /// The month this value belongs to, stored as YYYY-MM.
-  period            String
-  amount_cents      Int
-  currency          String    @default("usd")
-  recurring         Boolean   @default(true)
+  period               String
+  amount_cents         Int
+  currency             String    @default("usd")
+  recurring            Boolean   @default(true)
   /// pending | verified | rejected
-  verification      String    @default("pending")
-  description       String?
+  verification         String    @default("pending")
+  description          String?
   /// Where the number came from, e.g. an invoice or CRM opportunity id.
-  evidence_ref      String?
-  evidence_note     String?
+  evidence_ref         String?
+  evidence_note        String?
   /// Stops the same underlying event being counted twice.
-  source_system     String?
-  source_reference  String?
-  dedupe_key        String    @unique
+  source_system        String?
+  source_reference     String?
+  dedupe_key           String    @unique
   /// For avoided-cost records: the customer-approved pre-deployment figure
   /// and the measured figure afterwards. Both are required to verify.
-  baseline_cents    Int?
-  measured_cents    Int?
+  baseline_cents       Int?
+  measured_cents       Int?
   baseline_approved_by String?
-  createdBy         Int?
-  verifiedBy        Int?
-  verifiedAt        DateTime?
-  createdAt         DateTime  @default(now())
-  lastUpdatedAt     DateTime  @default(now())
+  createdBy            Int?
+  verifiedBy           Int?
+  verifiedAt           DateTime?
+  createdAt            DateTime  @default(now())
+  lastUpdatedAt        DateTime  @default(now())
 
   @@index([period])
   @@index([verification])

@@ -545,6 +545,17 @@ const router = createBrowserRouter([
         },
       },
       {
+        // Connecting your own AI service is something every customer does for
+        // their own account, so this is not an admin route.
+        path: "/ai-connection",
+        lazy: async () => {
+          const { default: AIConnectionPage } = await import(
+            "@/pages/Business/AIConnection"
+          );
+          return { element: <PrivateRoute Component={AIConnectionPage} /> };
+        },
+      },
+      {
         path: "/audit-log",
         lazy: async () => {
           const { default: AuditLogPage } = await import(

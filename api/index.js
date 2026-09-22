@@ -76,56 +76,45 @@ function disableWhatCannotWork() {
 }
 
 /**
- * A real model, on infrastructure this project already has.
+ * Supabase Postgres, from a serverless function.
  *
- * Vercel's AI Gateway speaks the OpenAI protocol and accepts this
- * deployment's own OIDC identity as its bearer token - no third-party account
- * and no separate provider key. AnythingLLM already has a provider for
- * "an OpenAI-compatible endpoint", so this is configuration, not new code.
+ * A function scales to many instances, each with its own connection pool, and
+ * a Postgres server has a fixed number of connections. Supabase answers that
+ * with a pooler; this makes sure we actually use it rather than opening a
+ * direct connection per instance and exhausting the server under load.
  *
- * An explicitly configured provider always wins: if someone sets OPEN_AI_KEY
- * or any other provider's key, this does nothing.
+ *   - `pgbouncer=true` tells Prisma to stop using prepared statements, which
+ *     a transaction-mode pooler cannot keep across queries.
+ *   - `connection_limit=1` is right for a function: the instance handles one
+ *     request at a time and the pooler does the sharing.
  *
- * The token is short-lived and Vercel reissues it per invocation, so this runs
- * on every request rather than once at boot.
+ * Both are added only when absent, so an explicit choice in the connection
+ * string always wins. A direct (non-pooled) URL is left exactly as given -
+ * migrations need one, and silently rewriting it would break them.
  */
-const EXPLICIT_PROVIDER_KEYS = [
-  "OPEN_AI_KEY",
-  "ANTHROPIC_API_KEY",
-  "GEMINI_API_KEY",
-  "AZURE_OPENAI_KEY",
-  "GROQ_API_KEY",
-  "OPENROUTER_API_KEY",
-  "MISTRAL_API_KEY",
-  "DEEPSEEK_API_KEY",
-  "XAI_LLM_API_KEY",
-  "TOGETHER_AI_API_KEY",
-];
+function tuneDatabaseUrl() {
+  const raw = String(process.env.DATABASE_URL ?? "").trim();
+  if (!raw.startsWith("postgres")) return;
 
-const AI_GATEWAY = "https://ai-gateway.vercel.sh/v1";
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return; // persistenceProblem() will have its say
+  }
 
-function selectModelProvider() {
-  const explicit = EXPLICIT_PROVIDER_KEYS.some(
-    (key) => String(process.env[key] ?? "").trim().length > 0
-  );
-  if (explicit) return;
+  const pooled =
+    url.port === "6543" ||
+    url.hostname.includes("pooler.") ||
+    url.hostname.startsWith("pgbouncer");
+  if (!pooled) return;
 
-  const identity = String(process.env.VERCEL_OIDC_TOKEN ?? "").trim();
-  if (!identity) return;
+  if (!url.searchParams.has("pgbouncer"))
+    url.searchParams.set("pgbouncer", "true");
+  if (!url.searchParams.has("connection_limit"))
+    url.searchParams.set("connection_limit", "1");
 
-  process.env.LLM_PROVIDER = process.env.LLM_PROVIDER || "generic-openai";
-  if (process.env.LLM_PROVIDER !== "generic-openai") return;
-
-  process.env.GENERIC_OPEN_AI_BASE_PATH =
-    process.env.GENERIC_OPEN_AI_BASE_PATH || AI_GATEWAY;
-  process.env.GENERIC_OPEN_AI_MODEL_PREF =
-    process.env.GENERIC_OPEN_AI_MODEL_PREF || "openai/gpt-4o-mini";
-  process.env.GENERIC_OPEN_AI_MODEL_TOKEN_LIMIT =
-    process.env.GENERIC_OPEN_AI_MODEL_TOKEN_LIMIT || "128000";
-
-  // Only ever the gateway's own address gets this deployment's identity.
-  if (process.env.GENERIC_OPEN_AI_BASE_PATH.startsWith(AI_GATEWAY))
-    process.env.GENERIC_OPEN_AI_API_KEY = identity;
+  process.env.DATABASE_URL = url.toString();
 }
 
 function selectVectorStore() {
@@ -320,7 +309,7 @@ const DATABASE_FREE = [
   "/api/founder/login",
   "/api/founder/session",
   "/api/founder/logout",
-  "/api/founder/model-check",
+  "/api/founder/readiness",
 ];
 
 const needsDatabase = (request) =>
@@ -343,9 +332,8 @@ module.exports = (request, response) => {
     );
   }
 
-  selectModelProvider();
-
   if (!app && !bootError) {
+    tuneDatabaseUrl();
     selectVectorStore();
     disableWhatCannotWork();
     try {
