@@ -42,35 +42,65 @@ function fail(message) {
 
 // ---------------------------------------------------------------- database --
 
-const databaseUrl = String(process.env.DATABASE_URL ?? "").trim();
-if (!databaseUrl)
-  fail(
-    "DATABASE_URL is not set.\n" +
-      "This deployment stores founder-created customer accounts, so it needs a\n" +
-      "Postgres connection string. Add DATABASE_URL in the Vercel project's\n" +
-      "environment variables and redeploy."
-  );
+/**
+ * Whether this deployment has somewhere durable to keep customer accounts.
+ *
+ * A missing or SQLite DATABASE_URL does not fail the build. Failing it would
+ * leave no deployment at all to look at, and the useful thing is a real URL
+ * that serves the application and says plainly what it still needs. The
+ * request handler refuses every API call in that state, so nothing can be
+ * created and then quietly lost.
+ */
+function persistenceState() {
+  const url = String(process.env.DATABASE_URL ?? "").trim();
+  if (!url) return { ok: false, why: "DATABASE_URL is not set." };
+  if (url.startsWith("file:") || url.endsWith(".db"))
+    return { ok: false, why: "DATABASE_URL points at a SQLite file." };
+  return { ok: true };
+}
 
-if (databaseUrl.startsWith("file:") || databaseUrl.endsWith(".db"))
-  fail(
-    "DATABASE_URL points at a SQLite file.\n" +
-      "A serverless instance does not keep its filesystem, so every customer\n" +
-      "account, password hash and access decision would be lost on the next\n" +
-      "cold start. Use Postgres."
-  );
+const persistence = persistenceState();
 
 console.log("[vercel-build] selecting the Postgres datasource");
 run("node", [path.join("scripts", "prisma-provider.cjs"), "postgresql"], ROOT);
 
+// The client is needed either way; generating it does not touch a database.
 run("npx", ["prisma", "generate", "--schema", "prisma/schema.prisma"], SERVER);
 
-// `db push` rather than `migrate deploy`: the committed migration history is
-// SQLite DDL and will not apply to Postgres.
-run(
-  "npx",
-  ["prisma", "db", "push", "--schema", "prisma/schema.prisma", "--skip-generate"],
-  SERVER
-);
+if (persistence.ok) {
+  // `db push` rather than `migrate deploy`: the committed migration history is
+  // SQLite DDL and will not apply to Postgres.
+  run(
+    "npx",
+    [
+      "prisma",
+      "db",
+      "push",
+      "--schema",
+      "prisma/schema.prisma",
+      "--skip-generate",
+    ],
+    SERVER
+  );
+} else {
+  console.warn(
+    [
+      "",
+      "=".repeat(72),
+      `[vercel-build] NO DATABASE: ${persistence.why}`,
+      "",
+      "The site will build and serve, but every API request will answer 500",
+      "with this reason. Founder-created customer accounts, password hashes",
+      "and access state cannot be stored on a serverless filesystem - a cold",
+      "start would lose all of it.",
+      "",
+      "To finish: add a Postgres DATABASE_URL to this project's environment",
+      "variables and redeploy. The schema is created automatically.",
+      "=".repeat(72),
+      "",
+    ].join("\n")
+  );
+}
 
 // ---------------------------------------------------------------- frontend --
 
