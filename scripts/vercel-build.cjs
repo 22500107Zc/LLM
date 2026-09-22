@@ -64,8 +64,15 @@ const persistence = persistenceState();
 console.log("[vercel-build] selecting the Postgres datasource");
 run("node", [path.join("scripts", "prisma-provider.cjs"), "postgresql"], ROOT);
 
-// The client is needed either way; generating it does not touch a database.
-run("npx", ["prisma", "generate", "--schema", "prisma/schema.prisma"], SERVER);
+// Generated from the ROOT, because that is where the function resolves
+// @prisma/client from - Vercel installs only the root manifest, so
+// server/node_modules does not exist there at all. Generating does not touch
+// a database.
+run(
+  "npx",
+  ["prisma", "generate", "--schema", path.join("server", "prisma", "schema.prisma")],
+  ROOT
+);
 
 if (persistence.ok) {
   // `db push` rather than `migrate deploy`: the committed migration history is
@@ -77,10 +84,10 @@ if (persistence.ok) {
       "db",
       "push",
       "--schema",
-      "prisma/schema.prisma",
+      path.join("server", "prisma", "schema.prisma"),
       "--skip-generate",
     ],
-    SERVER
+    ROOT
   );
 } else {
   console.warn(
@@ -104,7 +111,7 @@ if (persistence.ok) {
 
 // ---------------------------------------------------------------- frontend --
 
-run("npm", ["install", "--no-audit", "--no-fund"], FRONTEND);
+run("npm", ["install", "--legacy-peer-deps", "--no-audit", "--no-fund"], FRONTEND);
 run("npm", ["run", "build"], FRONTEND);
 
 const dist = path.join(FRONTEND, "dist");
