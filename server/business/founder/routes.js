@@ -365,6 +365,66 @@ function founderRoutes(app) {
     })
   );
 
+  // --------------------------------------------------------- model check --
+  /**
+   * Is there actually a model behind this deployment?
+   *
+   * The founder needs to know this before they sell anything, and "the chat
+   * box seems to work" is not an answer they can get before a customer
+   * exists. This makes one real completion call through whatever provider the
+   * deployment is configured with and reports what came back.
+   *
+   * Founder-only, and it names the provider and model but never the
+   * credential. It deliberately does not touch the database, so it answers
+   * even on a deployment that has no customers yet.
+   */
+  router.get(
+    "/model-check",
+    [auth.requireFounder],
+    safeHandler(async (_request, response) => {
+      const provider = process.env.LLM_PROVIDER || "openai";
+      const model =
+        process.env.GENERIC_OPEN_AI_MODEL_PREF ||
+        process.env.OPEN_MODEL_PREF ||
+        null;
+
+      try {
+        const { getLLMProvider } = require("../../utils/helpers");
+        const connector = getLLMProvider({});
+        const answer = await connector.getChatCompletion(
+          [
+            {
+              role: "user",
+              content:
+                "Reply with exactly: the assistant is reachable. Nothing else.",
+            },
+          ],
+          { temperature: 0 }
+        );
+
+        const text = String(
+          answer?.textResponse ?? answer?.content ?? answer ?? ""
+        ).trim();
+
+        return response.status(200).json({
+          ok: text.length > 0,
+          provider,
+          model,
+          sample: text.slice(0, 200),
+        });
+      } catch (error) {
+        console.error("[founder] model check failed:", error.message);
+        return response.status(200).json({
+          ok: false,
+          provider,
+          model,
+          // The founder is the one person who should see the real reason.
+          reason: String(error.message ?? error).slice(0, 300),
+        });
+      }
+    })
+  );
+
   // ---------------------------------------------------------------- audit --
   /** What the founder has done, from the existing audit trail. */
   router.get(

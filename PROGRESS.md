@@ -70,7 +70,7 @@ or websites. See "Founder control plane" below.
 - **Founder control plane** — `server/business/founder/`, `/founder` in the
   frontend, documented in `DEPLOYMENT.md` §2a. See below.
 - **The whole commercial loop, proved on Postgres through the real Vercel
-  entry point** — `scripts/production-loop-verification.cjs`. 86 checks, 0
+  entry point** — `scripts/production-loop-verification.cjs`. 88 checks, 0
   failures, 1 honestly blocked. See "Proof, not assertion" below.
 - **A customer lands somewhere usable** — creating an account provisions that
   business its first workspace. Customers are `default` role and cannot create
@@ -116,7 +116,7 @@ point, not a test harness — over a real socket.
 
 ```
 DATABASE_URL=postgresql://… node scripts/production-loop-verification.cjs
-COMMERCIAL LOOP: 86 passed, 0 failed, 1 blocked
+COMMERCIAL LOOP: 88 passed, 0 failed, 1 blocked
 ```
 
 Among the 70: a founder creates a customer; the customer signs in and lands in
@@ -146,7 +146,7 @@ Two AI sections, deliberately separate:
 ```
 npx jest                       1534 passed, 3 failed (ffmpeg), 1537 total
 npx jest __tests__/business     442 passed, 442 total   (run from server/)
-node scripts/production-loop-verification.cjs   86 passed, 0 failed, 1 blocked
+node scripts/production-loop-verification.cjs   88 passed, 0 failed, 1 blocked
 ./scripts/final-verification.sh 19 passed, 1 failed, 3 blocked
 ./scripts/operator-backup-test.sh   18 passed, 0 failed
 ```

@@ -683,11 +683,25 @@ function modelProviderConfigured() {
     ),
     JSON.stringify(customerSees.payload)
   );
-  const founderSees = await call("GET", "/api/founder/session");
+  const founderSees = await api.get("/api/founder/customers");
   check(
     "the founder is told exactly what is missing",
     /DATABASE_URL/.test(String(founderSees.payload?.message ?? "")),
     JSON.stringify(founderSees.payload)
+  );
+
+  // The founder must still be able to get in. Their login is an env-held
+  // hash and an in-memory session, so locking them out of the console that
+  // explains the problem would help nobody.
+  const stillOpen = await call("GET", "/api/founder/session");
+  check(
+    "founder login still works with no database at all",
+    stillOpen.status === 200,
+    `${stillOpen.status} ${JSON.stringify(stillOpen.payload)}`
+  );
+  check(
+    "customer data stays refused while there is nowhere to keep it",
+    founderSees.status === 503
   );
 
   process.env.DATABASE_URL = realDatabaseUrl;

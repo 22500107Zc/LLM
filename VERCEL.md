@@ -60,7 +60,7 @@ the real Vercel entry point — over a real socket against a real Postgres, with
 every `STRIPE_*` variable deleted from the process:
 
 ```
-COMMERCIAL LOOP: 86 passed, 0 failed, 1 blocked
+COMMERCIAL LOOP: 88 passed, 0 failed, 1 blocked
 ```
 
 The one blocked item is a model provider key, which this machine does not

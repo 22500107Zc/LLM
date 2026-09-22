@@ -75,6 +75,59 @@ function disableWhatCannotWork() {
   process.env.DISABLE_AGENT_CHAT = "true";
 }
 
+/**
+ * A real model, on infrastructure this project already has.
+ *
+ * Vercel's AI Gateway speaks the OpenAI protocol and accepts this
+ * deployment's own OIDC identity as its bearer token - no third-party account
+ * and no separate provider key. AnythingLLM already has a provider for
+ * "an OpenAI-compatible endpoint", so this is configuration, not new code.
+ *
+ * An explicitly configured provider always wins: if someone sets OPEN_AI_KEY
+ * or any other provider's key, this does nothing.
+ *
+ * The token is short-lived and Vercel reissues it per invocation, so this runs
+ * on every request rather than once at boot.
+ */
+const EXPLICIT_PROVIDER_KEYS = [
+  "OPEN_AI_KEY",
+  "ANTHROPIC_API_KEY",
+  "GEMINI_API_KEY",
+  "AZURE_OPENAI_KEY",
+  "GROQ_API_KEY",
+  "OPENROUTER_API_KEY",
+  "MISTRAL_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "XAI_LLM_API_KEY",
+  "TOGETHER_AI_API_KEY",
+];
+
+const AI_GATEWAY = "https://ai-gateway.vercel.sh/v1";
+
+function selectModelProvider() {
+  const explicit = EXPLICIT_PROVIDER_KEYS.some(
+    (key) => String(process.env[key] ?? "").trim().length > 0
+  );
+  if (explicit) return;
+
+  const identity = String(process.env.VERCEL_OIDC_TOKEN ?? "").trim();
+  if (!identity) return;
+
+  process.env.LLM_PROVIDER = process.env.LLM_PROVIDER || "generic-openai";
+  if (process.env.LLM_PROVIDER !== "generic-openai") return;
+
+  process.env.GENERIC_OPEN_AI_BASE_PATH =
+    process.env.GENERIC_OPEN_AI_BASE_PATH || AI_GATEWAY;
+  process.env.GENERIC_OPEN_AI_MODEL_PREF =
+    process.env.GENERIC_OPEN_AI_MODEL_PREF || "openai/gpt-4o-mini";
+  process.env.GENERIC_OPEN_AI_MODEL_TOKEN_LIMIT =
+    process.env.GENERIC_OPEN_AI_MODEL_TOKEN_LIMIT || "128000";
+
+  // Only ever the gateway's own address gets this deployment's identity.
+  if (process.env.GENERIC_OPEN_AI_BASE_PATH.startsWith(AI_GATEWAY))
+    process.env.GENERIC_OPEN_AI_API_KEY = identity;
+}
+
 function selectVectorStore() {
   if (!process.env.VECTOR_DB) process.env.VECTOR_DB = "pgvector";
   if (process.env.VECTOR_DB !== "pgvector") return;
@@ -254,8 +307,27 @@ function fail(response, status, body) {
 const isFounderSurface = (request) =>
   String(request.url ?? "").startsWith("/api/founder");
 
+/**
+ * The founder's surface that genuinely does not touch the database.
+ *
+ * Login is an env-held bcrypt hash and an in-memory session; the audit write
+ * that follows already fails soft. Refusing these would lock the one person
+ * who can fix a misconfiguration out of the console that tells them what is
+ * wrong. Everything else stays refused - nothing here reads or writes
+ * customer data.
+ */
+const DATABASE_FREE = [
+  "/api/founder/login",
+  "/api/founder/session",
+  "/api/founder/logout",
+  "/api/founder/model-check",
+];
+
+const needsDatabase = (request) =>
+  !DATABASE_FREE.includes(String(request.url ?? "").split("?")[0]);
+
 module.exports = (request, response) => {
-  const problem = persistenceProblem();
+  const problem = needsDatabase(request) ? persistenceProblem() : null;
   if (problem) {
     console.error("[vercel] refusing to serve:", problem);
     return fail(
@@ -270,6 +342,8 @@ module.exports = (request, response) => {
           }
     );
   }
+
+  selectModelProvider();
 
   if (!app && !bootError) {
     selectVectorStore();
