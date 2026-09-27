@@ -142,6 +142,35 @@ model business_ai_connections {
   user            users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
 }
 
+// The founder's signed-in sessions.
+//
+// These were an in-memory Map, which is wrong on a runtime that scales: only
+// the instance that served the login knew the session, so under any real
+// concurrency most founder requests came back 401 on a perfectly valid
+// session. The token is stored as a SHA-256 hash, so a copy of this table
+// yields nothing that can be replayed.
+model business_founder_sessions {
+  id         Int      @id @default(autoincrement())
+  token_hash String   @unique
+  csrf       String
+  expires_at DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([expires_at])
+}
+
+// Failed founder logins, counted somewhere every instance can see.
+//
+// Per-instance counting silently multiplied the allowed guesses by the number
+// of warm instances, which is the opposite of what a lockout is for.
+model business_founder_login_attempts {
+  id           Int       @id @default(autoincrement())
+  attempt_key  String    @unique
+  count        Int       @default(0)
+  first_at     DateTime  @default(now())
+  locked_until DateTime?
+}
+
 model recovery_codes {
   id        Int      @id @default(autoincrement())
   user_id   Int

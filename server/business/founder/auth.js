@@ -26,10 +26,35 @@ const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000;
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 
-/** Sessions live in memory: a restart signing everyone out is correct here. */
+/**
+ * Where a session actually lives.
+ *
+ * The database, so that every instance of a runtime that scales can see it.
+ * These were in-memory Maps, and on Vercel that meant only the instance which
+ * served the login knew the session: 14 of 20 concurrent founder requests on
+ * one valid session came back 401. A lockout counted the same way let an
+ * attacker have five guesses per warm instance rather than five in total.
+ *
+ * The Map survives as a fallback, and only that. A deployment with no
+ * database yet still lets the founder sign in to the console that explains
+ * what is missing - on one instance, which is all such a deployment has to
+ * offer anyway.
+ */
 const sessions = new Map();
 /** address -> { count, firstAt, lockedUntil } */
 const attempts = new Map();
+
+/** A session token is never stored as given; a copy of the table is useless. */
+const fingerprint = (token) =>
+  crypto.createHash("sha256").update(String(token)).digest("hex");
+
+function db() {
+  try {
+    return require("../../utils/prisma");
+  } catch {
+    return null;
+  }
+}
 
 function enabled() {
   return (
@@ -107,7 +132,21 @@ function pruneAttempts() {
   }
 }
 
-function lockoutFor(key) {
+async function lockoutFor(key) {
+  const prisma = db();
+  if (prisma) {
+    try {
+      const row = await prisma.business_founder_login_attempts.findUnique({
+        where: { attempt_key: key },
+      });
+      if (row?.locked_until && row.locked_until.getTime() > Date.now())
+        return row.locked_until.getTime() - Date.now();
+      return 0;
+    } catch (error) {
+      console.error("[founder] could not read login attempts:", error.message);
+    }
+  }
+
   const record = attempts.get(key);
   if (!record) return 0;
   if (record.lockedUntil && record.lockedUntil > Date.now())
@@ -115,10 +154,44 @@ function lockoutFor(key) {
   return 0;
 }
 
-function recordFailure(key) {
+async function recordFailure(key) {
   const now = Date.now();
+  const prisma = db();
+
+  if (prisma) {
+    try {
+      const existing = await prisma.business_founder_login_attempts.findUnique({
+        where: { attempt_key: key },
+      });
+
+      // A slow drip of guesses should not accumulate forever.
+      const stale =
+        existing && now - existing.first_at.getTime() > ATTEMPT_WINDOW_MS;
+      const count = stale ? 1 : (existing?.count ?? 0) + 1;
+      const firstAt = stale || !existing ? new Date(now) : existing.first_at;
+      const lockedUntil =
+        count >= MAX_ATTEMPTS ? new Date(now + LOCKOUT_MS) : null;
+
+      const row = await prisma.business_founder_login_attempts.upsert({
+        where: { attempt_key: key },
+        update: { count, first_at: firstAt, locked_until: lockedUntil },
+        create: {
+          attempt_key: key,
+          count,
+          first_at: firstAt,
+          locked_until: lockedUntil,
+        },
+      });
+      return { count: row.count, lockedUntil: row.locked_until?.getTime() };
+    } catch (error) {
+      console.error(
+        "[founder] could not record a login attempt:",
+        error.message
+      );
+    }
+  }
+
   const record = attempts.get(key) ?? { count: 0, firstAt: now };
-  // A slow drip of guesses should not accumulate forever.
   if (now - record.firstAt > ATTEMPT_WINDOW_MS) {
     record.count = 0;
     record.firstAt = now;
@@ -130,11 +203,22 @@ function recordFailure(key) {
   return record;
 }
 
-const clearFailures = (key) => attempts.delete(key);
+async function clearFailures(key) {
+  attempts.delete(key);
+  const prisma = db();
+  if (!prisma) return;
+  try {
+    await prisma.business_founder_login_attempts.deleteMany({
+      where: { attempt_key: key },
+    });
+  } catch (error) {
+    console.error("[founder] could not clear login attempts:", error.message);
+  }
+}
 
 // --------------------------------------------------------------- session ---
 
-function createSession() {
+async function createSession() {
   const token = crypto.randomBytes(32).toString("hex");
   const session = {
     token,
@@ -144,30 +228,106 @@ function createSession() {
     // a cookie the browser attaches automatically.
     csrf: crypto.randomBytes(24).toString("hex"),
   };
+
+  // The instance that issued it can answer without a round trip; every other
+  // instance reads the row.
   sessions.set(token, session);
+
+  const prisma = db();
+  if (prisma) {
+    try {
+      await prisma.business_founder_sessions.create({
+        data: {
+          token_hash: fingerprint(token),
+          csrf: session.csrf,
+          expires_at: new Date(session.expiresAt),
+        },
+      });
+    } catch (error) {
+      // A deployment with no database still gets a working console on this
+      // one instance, which is the only thing it has.
+      console.error(
+        "[founder] session not shared across instances:",
+        error.message
+      );
+    }
+  }
+
   return session;
 }
 
-function readSession(token) {
+async function readSession(token) {
   if (!token) return null;
-  const session = sessions.get(String(token));
-  if (!session) return null;
-  if (session.expiresAt <= Date.now()) {
-    sessions.delete(session.token);
+  const key = String(token);
+
+  const local = sessions.get(key);
+  if (local) {
+    if (local.expiresAt > Date.now()) return local;
+    sessions.delete(key);
+  }
+
+  const prisma = db();
+  if (!prisma) return null;
+
+  try {
+    const row = await prisma.business_founder_sessions.findUnique({
+      where: { token_hash: fingerprint(key) },
+    });
+    if (!row) return null;
+
+    if (row.expires_at.getTime() <= Date.now()) {
+      await prisma.business_founder_sessions.deleteMany({
+        where: { id: row.id },
+      });
+      return null;
+    }
+
+    const session = {
+      token: key,
+      createdAt: row.createdAt.getTime(),
+      expiresAt: row.expires_at.getTime(),
+      csrf: row.csrf,
+    };
+    sessions.set(key, session);
+    return session;
+  } catch (error) {
+    // Fail closed. An unreadable store is not a reason to let anyone in.
+    console.error("[founder] could not read the session:", error.message);
     return null;
   }
-  return session;
 }
 
-function destroySession(token) {
-  if (token) sessions.delete(String(token));
+async function destroySession(token) {
+  if (!token) return;
+  const key = String(token);
+  sessions.delete(key);
+
+  const prisma = db();
+  if (!prisma) return;
+  try {
+    await prisma.business_founder_sessions.deleteMany({
+      where: { token_hash: fingerprint(key) },
+    });
+  } catch (error) {
+    console.error("[founder] could not end the session:", error.message);
+  }
 }
 
 /** Removes anything already expired. Cheap and bounded. */
-function pruneSessions() {
+async function pruneSessions() {
   const now = Date.now();
   for (const [token, session] of sessions)
     if (session.expiresAt <= now) sessions.delete(token);
+
+  const prisma = db();
+  if (!prisma) return;
+  try {
+    await prisma.business_founder_sessions.deleteMany({
+      where: { expires_at: { lte: new Date(now) } },
+    });
+  } catch (error) {
+    console.error("[founder] could not prune sessions:", error.message);
+  }
 }
 
 function cookieOptions() {
@@ -193,7 +353,7 @@ async function authenticate(request, password) {
   if (!state.available) return { ok: false, error: state.reason };
 
   const key = attemptKey(request);
-  const locked = lockoutFor(key);
+  const locked = await lockoutFor(key);
   if (locked > 0)
     return {
       ok: false,
@@ -212,7 +372,7 @@ async function authenticate(request, password) {
   }
 
   if (!matches) {
-    const record = recordFailure(key);
+    const record = await recordFailure(key);
     await AuditLog.log({
       action: "founder.login_failed",
       category: AuditLog.CATEGORIES.SECURITY,
@@ -223,9 +383,9 @@ async function authenticate(request, password) {
     return { ok: false, error: "Incorrect password." };
   }
 
-  clearFailures(key);
-  pruneSessions();
-  const session = createSession();
+  await clearFailures(key);
+  await pruneSessions();
+  const session = await createSession();
   await AuditLog.log({
     action: "founder.login_succeeded",
     category: AuditLog.CATEGORIES.SECURITY,
@@ -258,7 +418,7 @@ function cookieValue(request, name) {
   return null;
 }
 
-function sessionFrom(request) {
+async function sessionFrom(request) {
   // request.cookies exists if something upstream parsed them; otherwise read
   // the header directly.
   const fromCookie =
@@ -273,12 +433,25 @@ function sessionFrom(request) {
  * founder cookie and the server-side session store, and knows nothing about
  * the customer JWT.
  */
-function requireFounder(request, response, next) {
+async function requireFounder(request, response, next) {
+  try {
+    return await gate(request, response, next);
+  } catch (error) {
+    // Reading the session is now a database call. If it throws, refuse -
+    // never fall through to the route.
+    console.error("[founder] authentication failed:", error.message);
+    return response
+      .status(401)
+      .json({ error: "Founder authentication required." });
+  }
+}
+
+async function gate(request, response, next) {
   const state = availability();
   if (!state.available)
     return response.status(404).json({ error: "Not found." });
 
-  const session = sessionFrom(request);
+  const session = await sessionFrom(request);
   if (!session)
     return response
       .status(401)
@@ -317,6 +490,23 @@ module.exports = {
   pruneSessions,
   cookieOptions,
   // Exported so tests can reset between cases.
+  /**
+   * Clears every trace of sessions and lockouts, in memory AND in the
+   * database. A suite that only cleared the Maps would leave a real lockout
+   * row behind and then fail the next fifty tests for the wrong reason.
+   */
+  _reset: async function () {
+    sessions.clear();
+    attempts.clear();
+    const prisma = db();
+    if (!prisma) return;
+    try {
+      await prisma.business_founder_sessions.deleteMany({});
+      await prisma.business_founder_login_attempts.deleteMany({});
+    } catch {
+      /* the tables may not exist yet; nothing to clear */
+    }
+  },
   _sessions: sessions,
   _attempts: attempts,
 };

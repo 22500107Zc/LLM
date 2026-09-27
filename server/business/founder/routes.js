@@ -79,7 +79,9 @@ function founderRoutes(app) {
           authenticated: false,
         });
 
-      const session = auth.sessionFrom(request);
+      // Reading a session is a database call now; an un-awaited Promise is
+      // truthy, which would report every visitor as signed in.
+      const session = await auth.sessionFrom(request);
       response.status(200).json({
         available: true,
         authenticated: !!session,
@@ -123,7 +125,7 @@ function founderRoutes(app) {
     [auth.requireFounder],
     safeHandler(async (_request, response) => {
       const session = response.locals.founderSession;
-      auth.destroySession(session?.token);
+      await auth.destroySession(session?.token);
       // Attributes must match the cookie that was set or some browsers keep
       // it. The server-side session is gone either way.
       const { maxAge: _ignored, ...attributes } = auth.cookieOptions();

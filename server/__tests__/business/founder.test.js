@@ -215,11 +215,66 @@ afterAll(async () => {
 beforeEach(async () => {
   await prisma.business_customers.deleteMany({});
   await prisma.users.deleteMany({});
-  auth._sessions.clear();
-  auth._attempts.clear();
+  // Sessions and lockouts are real, shared state now - clearing only the
+  // in-memory copy would leave a lockout row behind in the database.
+  await auth._reset();
   // The login limiter is real product behaviour; a suite that signs in fifty
   // times would trip it and fail for the wrong reason.
   require("../../business/founder/routes").founderRoutes.resetRateLimit();
+});
+
+// ============================================ sessions across instances =====
+
+describe("a founder session works on every instance", () => {
+  /**
+   * This is the defect a production stress test found: sessions lived in an
+   * in-memory Map, so on a runtime that scales only the instance which served
+   * the login knew about them. Fourteen of twenty concurrent requests on one
+   * valid session came back 401.
+   *
+   * `_sessions.clear()` here stands in for a different instance: same
+   * database, no local memory of the login.
+   */
+  it("is still valid on an instance that never saw the login", async () => {
+    const api = founderClient();
+    await api.login();
+
+    auth._sessions.clear();
+
+    const onAnotherInstance = await api.get("/api/founder/customers");
+    expect(onAnotherInstance.status).toBe(200);
+  });
+
+  it("survives a mutating request from an instance that never saw it", async () => {
+    const api = founderClient();
+    await api.login();
+    auth._sessions.clear();
+
+    const created = await createCustomer(api, {});
+    expect(created.status).toBe(201);
+  });
+
+  it("is gone everywhere once the founder signs out", async () => {
+    const api = founderClient();
+    await api.login();
+    await api.post("/api/founder/logout", {});
+
+    auth._sessions.clear();
+    expect((await api.get("/api/founder/customers")).status).toBe(401);
+  });
+
+  it("counts failed logins across instances, not per instance", async () => {
+    const api = founderClient();
+    for (let attempt = 0; attempt < 5; attempt += 1)
+      await api.login("definitely-not-the-password");
+
+    // A fresh instance: no local memory of any of those attempts.
+    auth._sessions.clear();
+    auth._attempts.clear();
+
+    const locked = await api.login();
+    expect(locked.status).toBe(429);
+  });
 });
 
 // ===================================================== no public signup =====
@@ -291,6 +346,29 @@ describe("founder authentication", () => {
     expect(result.setCookie).toBeNull();
   });
 
+  it("reports a signed-out visitor as signed out, not as an error", async () => {
+    // The console calls this on every page load. It once returned 500 for
+    // everyone, because a session read that became asynchronous was used
+    // without being awaited - and a pending Promise is truthy.
+    const visitor = founderClient();
+    const result = await visitor.get("/api/founder/session");
+    expect(result.status).toBe(200);
+    expect(result.payload.authenticated).toBe(false);
+    expect(result.payload.csrfToken).toBeNull();
+  });
+
+  it("reports a signed-in founder as signed in, with a usable CSRF token", async () => {
+    const api = founderClient();
+    await api.login();
+    const result = await api.get("/api/founder/session");
+    expect(result.status).toBe(200);
+    expect(result.payload.authenticated).toBe(true);
+    expect(typeof result.payload.csrfToken).toBe("string");
+    expect(new Date(result.payload.expiresAt).getTime()).toBeGreaterThan(
+      Date.now()
+    );
+  });
+
   it("never returns the founder secret to the browser", async () => {
     const api = founderClient();
     await api.login();
@@ -301,7 +379,9 @@ describe("founder authentication", () => {
       api.get("/api/founder/customers"),
       api.get("/api/founder/audit"),
     ]);
-    for (const { payload } of responses) {
+    for (const { status, payload } of responses) {
+      // An error body contains no secret either; make sure these actually worked.
+      expect(status).toBe(200);
       const serialized = JSON.stringify(payload);
       expect(serialized).not.toContain(FOUNDER_PASSWORD);
       expect(serialized).not.toContain(founderHash);

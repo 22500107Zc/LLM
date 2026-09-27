@@ -918,13 +918,15 @@ function modelProviderConfigured() {
     (await customerLogin("newdana@acme.test", NEXT_PASSWORD)).payload?.valid ===
       true
   );
-  // The founder's in-memory session is gone, which is correct.
+  // The founder's session survives a cold start - the fix a production
+  // stress test forced. It used to live in memory, so every new instance
+  // signed the founder out and most concurrent requests came back 401.
   const staleFounder = await call("GET", "/api/founder/customers", {
     headers: { Cookie: api.state.cookie },
   });
   check(
-    "the founder's old session did NOT survive the restart",
-    staleFounder.status === 401,
+    "the founder's session survives a cold start",
+    staleFounder.status === 200,
     `got ${staleFounder.status}`
   );
   const freshFounder = founder();
