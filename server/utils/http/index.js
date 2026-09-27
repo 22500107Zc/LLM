@@ -6,8 +6,13 @@ const { User } = require("../../models/user");
 const { jsonrepair } = require("jsonrepair");
 const extract = require("extract-json-from-string");
 
+// Bodies already parsed by rejectUnreadableBody, so reqBody need not parse
+// the same string again.
+const parsedBodies = new WeakMap();
+
 function reqBody(request) {
   if (typeof request.body !== "string") return request.body;
+  if (parsedBodies.has(request)) return parsedBodies.get(request);
   try {
     return JSON.parse(request.body);
   } catch (error) {
@@ -20,6 +25,27 @@ function reqBody(request) {
     badRequest.cause = error;
     throw badRequest;
   }
+}
+
+/**
+ * The text parser hands a text/plain body through as a string, and most routes
+ * parse it with reqBody inside their own try/catch - which answers any throw
+ * with a bare 500. Reject a body that is not JSON once, up front, so a client's
+ * garbage is a 400 on every route. The string itself is left in place for the
+ * routes that forward it as-is.
+ */
+function rejectUnreadableBody(request, response, next) {
+  if (typeof request.body !== "string" || request.body.trim() === "")
+    return next();
+  try {
+    parsedBodies.set(request, JSON.parse(request.body));
+  } catch {
+    return response.status(400).json({
+      error: "bad_request",
+      message: "That request could not be read. Check that it is valid JSON.",
+    });
+  }
+  return next();
 }
 
 function queryParams(request) {
@@ -138,6 +164,7 @@ function decodeHtmlEntities(str) {
 
 module.exports = {
   reqBody,
+  rejectUnreadableBody,
   multiUserMode,
   queryParams,
   makeJWT,

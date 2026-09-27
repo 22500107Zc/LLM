@@ -159,6 +159,9 @@ function build() {
   application.use(bodyParser.text({ limit: "10mb" }));
   application.use(bodyParser.json({ limit: "10mb" }));
   application.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
+  application.use(
+    require(path.join(SERVER_DIR, "utils", "http")).rejectUnreadableBody
+  );
 
   // The founder plane first, on its own prefix, exactly as the long-running
   // server mounts it - ahead of the customer API and sharing none of its

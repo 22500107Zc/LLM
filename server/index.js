@@ -9,7 +9,7 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const path = require("path");
-const { reqBody } = require("./utils/http");
+const { reqBody, rejectUnreadableBody } = require("./utils/http");
 const { systemEndpoints } = require("./endpoints/system");
 const { workspaceEndpoints } = require("./endpoints/workspaces");
 const { chatEndpoints } = require("./endpoints/chat");
@@ -92,6 +92,7 @@ app.use(
     extended: true,
   })
 );
+app.use(rejectUnreadableBody);
 
 if (!!process.env.ENABLE_HTTPS) {
   bootSSL(app, process.env.SERVER_PORT || 3001);

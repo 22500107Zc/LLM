@@ -696,6 +696,19 @@ function modelProviderConfigured() {
     /valid JSON/i.test(garbledBody) && !/at .*\.js:\d+/.test(garbledBody),
     garbledBody.slice(0, 120)
   );
+  // The same garbage sent as text/plain skipped the JSON parser and reached
+  // the route, whose own catch answered 500.
+  const garbledText = await fetch(`${base}/api/request-token`, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: "<<<not json>>>",
+  });
+  const garbledTextBody = await garbledText.text();
+  check(
+    "malformed text/plain is a 400 too",
+    garbledText.status === 400,
+    `${garbledText.status} ${garbledTextBody.slice(0, 80)}`
+  );
 
   // ------------------------------------------- what an unconfigured deploy says
   //
