@@ -7,9 +7,19 @@ const { jsonrepair } = require("jsonrepair");
 const extract = require("extract-json-from-string");
 
 function reqBody(request) {
-  return typeof request.body === "string"
-    ? JSON.parse(request.body)
-    : request.body;
+  if (typeof request.body !== "string") return request.body;
+  try {
+    return JSON.parse(request.body);
+  } catch (error) {
+    // A body the client sent that is not JSON is the client's mistake, not a
+    // server failure. Some runtimes (Vercel among them) hand the raw string
+    // through untouched, so this is where it is first parsed - tag it 400 so
+    // the error handler answers accordingly instead of logging a 500.
+    const badRequest = new Error("The request body is not valid JSON.");
+    badRequest.status = 400;
+    badRequest.cause = error;
+    throw badRequest;
+  }
 }
 
 function queryParams(request) {
