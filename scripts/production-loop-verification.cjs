@@ -676,6 +676,27 @@ function modelProviderConfigured() {
     );
   }
 
+  // -------------------------------------------------- a request we can't read
+  //
+  // A stress test found malformed JSON answering 500 - blaming the server for
+  // a bad request, and logging a stack trace for every one.
+  const garbled = await fetch(`${base}/api/request-token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "<<<not json>>>",
+  });
+  const garbledBody = await garbled.text();
+  check(
+    "malformed JSON is a 400, not a server error",
+    garbled.status === 400,
+    `${garbled.status} ${garbledBody.slice(0, 80)}`
+  );
+  check(
+    "and the answer is readable, with no stack trace",
+    /valid JSON/i.test(garbledBody) && !/at .*\.js:\d+/.test(garbledBody),
+    garbledBody.slice(0, 120)
+  );
+
   // ------------------------------------------- what an unconfigured deploy says
   //
   // Before this deployment has a database there are no customers, but the

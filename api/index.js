@@ -250,13 +250,28 @@ function build() {
 
   // Nothing below Express should ever reach a customer as a stack trace.
   application.use((error, request, response, _next) => {
+    if (response.headersSent) return response.end();
+
+    // A request the client got wrong is not our failure. body-parser throws
+    // with a 4xx status for malformed JSON (400) or an oversized body (413);
+    // answering those 500 blamed the server for a bad request and logged a
+    // stack trace for every one - which a stress test found in one line.
+    const status = Number(error?.status ?? error?.statusCode);
+    if (status >= 400 && status < 500)
+      return response.status(status).json({
+        error: status === 413 ? "too_large" : "bad_request",
+        message:
+          status === 413
+            ? "That request is too large."
+            : "That request could not be read. Check that it is valid JSON.",
+      });
+
     console.error(
       "[vercel] unhandled error:",
       request.method,
       request.url,
       error
     );
-    if (response.headersSent) return response.end();
     return response.status(500).json({
       error: "server_error",
       message:
